@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import AppPanel from "../components/app-panel";
+import GlassLink from "../components/glass-link";
+import Pill from "../components/pill";
 import ChatClient from "./chat-client";
-
-const pageBackgroundClasses =
-  "min-h-full bg-[radial-gradient(1000px_520px_at_10%_0%,rgba(0,110,255,0.14),transparent_60%),radial-gradient(900px_540px_at_95%_18%,rgba(255,135,0,0.16),transparent_58%),radial-gradient(700px_420px_at_50%_100%,rgba(0,0,0,0.08),transparent_55%),linear-gradient(to_bottom,#fcfbf7,#f4f4f5)] dark:bg-[radial-gradient(1000px_520px_at_10%_0%,rgba(0,110,255,0.18),transparent_60%),radial-gradient(900px_540px_at_95%_18%,rgba(255,135,0,0.16),transparent_58%),radial-gradient(700px_420px_at_50%_100%,rgba(255,255,255,0.08),transparent_55%),linear-gradient(to_bottom,#050505,#0b0b0c)]";
 
 export const metadata: Metadata = {
   title: "Chat",
@@ -13,7 +11,7 @@ export const metadata: Metadata = {
 
 export default function ChatPage() {
   return (
-    <div className={`${pageBackgroundClasses} dark`}>
+    <div className="ch26-chat-shell dark">
       <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-4 py-10 sm:px-6">
         <header className="mb-6 flex items-center justify-between">
           <div className="flex items-baseline gap-3">
@@ -23,20 +21,17 @@ export default function ChatPage() {
               </span>
             </h1>
             <div className="hidden items-center gap-2 sm:flex">
-              <span className="inline-flex items-center rounded-full border border-black/10 bg-white/50 px-2.5 py-1 text-xs font-semibold text-zinc-800 backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-zinc-200">
+              <Pill size="sm" tone="default">
                 UI only
-              </span>
-              <span className="inline-flex items-center rounded-full border border-black/10 bg-white/50 px-2.5 py-1 text-xs font-semibold text-zinc-800 backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-zinc-200">
+              </Pill>
+              <Pill size="sm" tone="default">
                 RAG ready
-              </span>
+              </Pill>
             </div>
           </div>
-          <Link
-            href="/"
-            className="rounded-full border border-black/10 bg-white/50 px-3 py-1.5 text-sm font-semibold text-zinc-900 backdrop-blur transition hover:bg-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 dark:border-white/10 dark:bg-white/5 dark:text-zinc-100 dark:hover:bg-white/10 dark:focus-visible:ring-white/20"
-          >
+          <GlassLink href="/" size="sm" className="bg-white/50 hover:bg-white/70">
             Home
-          </Link>
+          </GlassLink>
         </header>
 
         <AppPanel className="relative flex-1 overflow-hidden border-2 border-black/50">

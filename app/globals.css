@@ -56,3 +56,83 @@
     opacity: 1;
   }
 }
+
+@keyframes ch26-greeting-expand {
+  from {
+    width: var(--ch26-greeting-width-start, max-content);
+  }
+  to {
+    width: 70%;
+  }
+}
+
+@layer components {
+  .ch26-divider {
+    @apply border-t border-black/10 dark:border-white/10;
+  }
+
+  .ch26-surface {
+    @apply rounded-2xl border border-black/10 backdrop-blur dark:border-white/10;
+  }
+
+  .ch26-surface--glass {
+    @apply bg-white/60 shadow-sm dark:bg-white/5;
+  }
+
+  .ch26-surface--glass-soft {
+    @apply bg-white/40 dark:bg-white/5;
+  }
+
+  .ch26-pill {
+    @apply inline-flex items-center rounded-full border border-black/10 backdrop-blur dark:border-white/10;
+  }
+
+  .ch26-pill--xs {
+    @apply px-2.5 py-1 text-[11px] font-semibold;
+  }
+
+  .ch26-pill--sm {
+    @apply px-2.5 py-1 text-xs font-semibold;
+  }
+
+  .ch26-pill--hint {
+    @apply px-2 py-1 text-xs font-medium;
+  }
+
+  .ch26-pill--muted {
+    @apply bg-white/30 text-zinc-500 dark:bg-white/5 dark:text-zinc-400;
+  }
+
+  .ch26-pill--default {
+    @apply bg-white/50 text-zinc-800 dark:bg-white/5 dark:text-zinc-200;
+  }
+
+  .ch26-pill--strong {
+    @apply bg-white/60 text-zinc-900 shadow-sm dark:bg-white/5 dark:text-zinc-100;
+  }
+
+  .ch26-button-glass {
+    @apply rounded-full border border-black/10 bg-white/60 px-3 py-1.5 text-sm font-semibold text-zinc-900 backdrop-blur transition hover:bg-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 dark:border-white/10 dark:bg-white/5 dark:text-zinc-100 dark:hover:bg-white/10 dark:focus-visible:ring-white/20;
+  }
+
+  .ch26-codeblock {
+    @apply overflow-x-auto rounded-xl bg-black/5 p-3 text-[12px] leading-5 text-zinc-900 dark:bg-white/5 dark:text-zinc-100;
+  }
+}
+
+.ch26-chat-shell {
+  min-height: 100%;
+  background:
+    radial-gradient(1000px 520px at 10% 0%, rgba(0, 110, 255, 0.14), transparent 60%),
+    radial-gradient(900px 540px at 95% 18%, rgba(255, 135, 0, 0.16), transparent 58%),
+    radial-gradient(700px 420px at 50% 100%, rgba(0, 0, 0, 0.08), transparent 55%),
+    linear-gradient(to bottom, #fcfbf7, #f4f4f5);
+}
+
+.ch26-chat-shell.dark {
+  background:
+    radial-gradient(1000px 520px at 10% 0%, rgba(0, 110, 255, 0.18), transparent 60%),
+    radial-gradient(900px 540px at 95% 18%, rgba(255, 135, 0, 0.16), transparent 58%),
+    radial-gradient(700px 420px at 50% 100%, rgba(255, 255, 255, 0.08), transparent 55%),
+    linear-gradient(to bottom, #050505, #0b0b0c);
+}

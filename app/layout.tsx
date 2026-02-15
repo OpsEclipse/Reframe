@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Fraunces, IBM_Plex_Mono, Instrument_Sans, Manrope } from "next/font/google";
+import { Fraunces, IBM_Plex_Mono, Instrument_Sans, Inter, Manrope } from "next/font/google";
 import "./globals.css";
 
 const instrumentSans = Instrument_Sans({
@@ -7,10 +7,16 @@ const instrumentSans = Instrument_Sans({
   subsets: ["latin"],
 });
 
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  weight: ["400", "500"],
+});
+
 const manrope = Manrope({
   variable: "--font-manrope",
   subsets: ["latin"],
-  weight: ["400", "600"],
+  weight: ["400", "500", "600"],
 });
 
 const fraunces = Fraunces({
@@ -42,6 +48,7 @@ export default function RootLayout({
           instrumentSans.variable,
           fraunces.variable,
           plexMono.variable,
+          inter.variable,
           "min-h-dvh",
           "font-sans",
           "antialiased",

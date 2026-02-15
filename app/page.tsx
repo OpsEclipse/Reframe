@@ -1,5 +1,6 @@
 import HomeIntroTransition from "./home-intro-transition";
 import AppPanel from "./components/app-panel";
+import IntroGreetingBlock from "./components/intro_greeting_block";
 
 export default function Home() {
   return (
@@ -14,11 +15,15 @@ export default function Home() {
 
       <AppPanel
         className={[
-          "relative flex-1 min-h-0 w-full overflow-hidden",
+          "relative flex flex-1 min-h-0 w-full items-center overflow-hidden",
           "border-2 border-black/50",
           "px-[clamp(24px,10vw,384px)] py-[clamp(24px,6vw,64px)]",
           "[--ch26-intro-overlay-delay:150ms]",
           "[--ch26-intro-overlay-duration:2200ms]",
+          // Timing vars for the intro greeting sequence (used for coordinated transitions).
+          "[--ch26-greeting-start:calc(var(--ch26-intro-overlay-delay)+var(--ch26-intro-overlay-duration)+150ms)]",
+          "[--ch26-greeting-duration:2800ms]",
+          "[--ch26-greeting-end:calc(var(--ch26-greeting-start)+var(--ch26-greeting-duration))]",
           "before:pointer-events-none before:absolute before:inset-0 before:content-['']",
           "before:rounded-2xl",
           // Intro (Figma node 36:3651): dark panel gradient, then fade to the app's main panel.
@@ -31,35 +36,10 @@ export default function Home() {
           "group-data-[ch26-stage=final]:before:opacity-0",
           "motion-reduce:before:delay-0 motion-reduce:before:duration-[1ms]",
         ].join(" ")}
-        data-node-id="29:6"
-      >
-        <div
-          className="relative z-10 flex h-full flex-col items-center justify-center"
-          data-node-id="29:9"
-        >
-          <p
-            className={[
-              "m-0 text-2xl font-semibold leading-none text-white/90",
-              "opacity-0",
-              "transition",
-              "will-change-[opacity]",
-              "group-data-[ch26-stage=final]:animate-[ch26-greeting-flicker_2800ms_cubic-bezier(0.16,1,0.3,1)_both]",
-              // Start the flicker only after the intro overlay has fully faded.
-              "group-data-[ch26-stage=final]:[animation-delay:calc(var(--ch26-intro-overlay-delay)+var(--ch26-intro-overlay-duration)+150ms)]",
-              // Safety: if the animation is dropped for any reason, still reveal the greeting after the same delay.
-              "group-data-[ch26-stage=final]:opacity-100",
-              "group-data-[ch26-stage=final]:[transition-delay:calc(var(--ch26-intro-overlay-delay)+var(--ch26-intro-overlay-duration)+150ms)]",
-              "group-data-[ch26-stage=final]:[transition-duration:120ms]",
-              "motion-reduce:will-change-auto",
-              "motion-reduce:animate-none",
-              "motion-reduce:opacity-100",
-            ].join(" ")}
-            data-node-id="29:8"
-          >
-            Good evening, Raghav.
-          </p>
-        </div>
-      </AppPanel>
-    </main>
-  );
+	        data-node-id="29:6"
+	      >
+	        <IntroGreetingBlock greeting="Good evening, Raghav." />
+	      </AppPanel>
+	    </main>
+	  );
 }

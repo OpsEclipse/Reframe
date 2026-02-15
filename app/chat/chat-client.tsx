@@ -12,6 +12,12 @@ import {
 } from "react";
 import type { ChatGenerateResponse, SourceCitation } from "@/lib/rag-answer";
 import { normalizeSourceCitations } from "@/app/chat/source-citations";
+import AvatarBadge from "@/app/components/avatar-badge";
+import GlassButton from "@/app/components/glass-button";
+import JsonDetails from "@/app/components/json-details";
+import Pill from "@/app/components/pill";
+import SectionCard from "@/app/components/section-card";
+import Surface from "@/app/components/surface";
 
 type Role = "user" | "assistant";
 
@@ -147,19 +153,11 @@ function isNonEmptyStringArray(x: unknown): x is string[] {
   return Array.isArray(x) && x.length > 0 && x.every((v) => typeof v === "string");
 }
 
-function NullChip() {
+function NullPill() {
   return (
-    <span className="inline-flex items-center rounded-full border border-black/10 bg-white/30 px-2.5 py-1 text-[11px] font-semibold text-zinc-500 backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-zinc-400">
+    <Pill tone="muted" size="xs">
       null
-    </span>
-  );
-}
-
-function Chip({ label }: { label: string }) {
-  return (
-    <span className="inline-flex items-center rounded-full border border-black/10 bg-white/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-900 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-zinc-100">
-      {label}
-    </span>
+    </Pill>
   );
 }
 
@@ -191,113 +189,106 @@ function GatekeeperCard({ payload }: { payload: GatekeeperApiResponse }) {
   const embeddingDims =
     typeof payload.embedding?.dims === "number" ? payload.embedding.dims : null;
 
-  if (!meta) {
-    return (
-      <div className="text-sm text-zinc-800 dark:text-zinc-200">
-        Gatekeeper returned no metadata.
-      </div>
-    );
-  }
+  const metaText =
+    embeddingModel && embeddingDims
+      ? `Embedding: ${embeddingModel}, dims ${embeddingDims}`
+      : null;
 
   return (
-    <div className="w-full">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
-          Gatekeeper Metadata
+    <SectionCard title="Gatekeeper Metadata" meta={metaText}>
+      {meta ? (
+        <>
+          <FieldRow k="skip_RAG">
+            <Pill tone="strong" size="xs">
+              {meta.skip_RAG ? "true" : "false"}
+            </Pill>
+          </FieldRow>
+
+          <div className="ch26-divider" />
+
+          <FieldRow k="reframed_query">
+            {meta.reframed_query ? (
+              <span className="break-words">{meta.reframed_query}</span>
+            ) : (
+              <NullPill />
+            )}
+          </FieldRow>
+
+          <div className="ch26-divider" />
+
+          <FieldRow k="emotions">
+            {isNonEmptyStringArray(meta.emotions) ? (
+              <div className="flex flex-wrap gap-2">
+                {meta.emotions.map((e) => (
+                  <Pill key={e} tone="strong" size="xs">
+                    {e}
+                  </Pill>
+                ))}
+              </div>
+            ) : (
+              <NullPill />
+            )}
+          </FieldRow>
+
+          <div className="ch26-divider" />
+
+          <FieldRow k="people">
+            {isNonEmptyStringArray(meta.people) ? (
+              <div className="flex flex-wrap gap-2">
+                {meta.people.map((p) => (
+                  <Pill key={p} tone="strong" size="xs">
+                    {p}
+                  </Pill>
+                ))}
+              </div>
+            ) : (
+              <NullPill />
+            )}
+          </FieldRow>
+
+          <div className="ch26-divider" />
+
+          <FieldRow k="keywords">
+            {isNonEmptyStringArray(meta.keywords) ? (
+              <div className="flex flex-wrap gap-2">
+                {meta.keywords.map((kw) => (
+                  <Pill key={kw} tone="strong" size="xs">
+                    {kw}
+                  </Pill>
+                ))}
+              </div>
+            ) : (
+              <NullPill />
+            )}
+          </FieldRow>
+
+          <div className="ch26-divider" />
+
+          <FieldRow k="date_int">
+            {typeof meta.date_int === "number" ? (
+              <span className="font-mono text-sm">{meta.date_int}</span>
+            ) : (
+              <NullPill />
+            )}
+          </FieldRow>
+
+          {rewritten ? (
+            <>
+              <div className="ch26-divider" />
+              <FieldRow k="rewritten_query">
+                <span className="break-words">{rewritten}</span>
+              </FieldRow>
+            </>
+          ) : null}
+
+          <JsonDetails value={meta} />
+        </>
+      ) : (
+        <div className="text-sm text-zinc-800 dark:text-zinc-200">
+          Gatekeeper returned no metadata.
         </div>
-        {embeddingModel && embeddingDims ? (
-          <div className="shrink-0 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
-            Embedding: {embeddingModel}, dims {embeddingDims}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="rounded-2xl border border-black/10 bg-white/60 p-4 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
-        <FieldRow k="skip_RAG">
-          <Chip label={meta.skip_RAG ? "true" : "false"} />
-        </FieldRow>
-
-        <div className="border-t border-black/10 dark:border-white/10" />
-
-        <FieldRow k="reframed_query">
-          {meta.reframed_query ? (
-            <span className="break-words">{meta.reframed_query}</span>
-          ) : (
-            <NullChip />
-          )}
-        </FieldRow>
-
-        <div className="border-t border-black/10 dark:border-white/10" />
-
-        <FieldRow k="emotions">
-          {isNonEmptyStringArray(meta.emotions) ? (
-            <div className="flex flex-wrap gap-2">
-              {meta.emotions.map((e) => (
-                <Chip key={e} label={e} />
-              ))}
-            </div>
-          ) : (
-            <NullChip />
-          )}
-        </FieldRow>
-
-        <div className="border-t border-black/10 dark:border-white/10" />
-
-        <FieldRow k="people">
-          {isNonEmptyStringArray(meta.people) ? (
-            <div className="flex flex-wrap gap-2">
-              {meta.people.map((p) => (
-                <Chip key={p} label={p} />
-              ))}
-            </div>
-          ) : (
-            <NullChip />
-          )}
-        </FieldRow>
-
-        <div className="border-t border-black/10 dark:border-white/10" />
-
-        <FieldRow k="keywords">
-          {isNonEmptyStringArray(meta.keywords) ? (
-            <div className="flex flex-wrap gap-2">
-              {meta.keywords.map((kw) => (
-                <Chip key={kw} label={kw} />
-              ))}
-            </div>
-          ) : (
-            <NullChip />
-          )}
-        </FieldRow>
-
-        <div className="border-t border-black/10 dark:border-white/10" />
-
-        <FieldRow k="date_int">
-          {typeof meta.date_int === "number" ? (
-            <span className="font-mono text-sm">{meta.date_int}</span>
-          ) : (
-            <NullChip />
-          )}
-        </FieldRow>
-
-        {rewritten ? (
-          <>
-            <div className="border-t border-black/10 dark:border-white/10" />
-            <FieldRow k="rewritten_query">
-              <span className="break-words">{rewritten}</span>
-            </FieldRow>
-          </>
-        ) : null}
-      </div>
-
-      <details className="mt-3 rounded-2xl border border-black/10 bg-white/40 px-4 py-3 text-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
-        <summary className="cursor-pointer select-none text-xs font-semibold text-zinc-700 dark:text-zinc-200">
-          Raw JSON
-        </summary>
-        <pre className="mt-3 overflow-x-auto rounded-xl bg-black/5 p-3 text-[12px] leading-5 text-zinc-900 dark:bg-white/5 dark:text-zinc-100">
-          {JSON.stringify(meta, null, 2)}
-        </pre>
-      </details>
-    </div>
+      )}
+    </SectionCard>
   );
 }
 
@@ -319,34 +310,19 @@ function TopChunksCard({
 }) {
   if (error) {
     return (
-      <div className="w-full">
-        <div className="mb-3 text-sm font-semibold text-zinc-950 dark:text-zinc-50">
-          Top Chunks
-        </div>
-        <div className="rounded-2xl border border-black/10 bg-white/60 p-4 text-sm text-zinc-800 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-zinc-200">
-          Retrieve error: {error}
-        </div>
-      </div>
+      <SectionCard title="Top Chunks">
+        <div className="text-sm text-zinc-800 dark:text-zinc-200">Retrieve error: {error}</div>
+      </SectionCard>
     );
   }
 
   const chunks = Array.isArray(payload?.chunks) ? payload!.chunks! : [];
   const stats = payload?.stats;
+  const metaText = stats ? `${stats.union_count} union, ${chunks.length} shown` : null;
 
   return (
-    <div className="w-full">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
-          Top Chunks
-        </div>
-        {stats ? (
-          <div className="shrink-0 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
-            {stats.union_count} union, {chunks.length} shown
-          </div>
-        ) : null}
-      </div>
-
-      <div className="rounded-2xl border border-black/10 bg-white/60 p-4 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
+    <SectionCard title="Top Chunks" meta={metaText}>
+      <div>
         {chunks.length ? (
           <div className="flex flex-col gap-4">
             {chunks.map((c, idx) => {
@@ -367,10 +343,7 @@ function TopChunksCard({
                 reasons.emotions.length || reasons.people.length || reasons.keywords.length;
 
               return (
-                <div
-                  key={c.id}
-                  className="rounded-xl border border-black/10 bg-white/40 p-3 dark:border-white/10 dark:bg-white/5"
-                >
+                <Surface key={c.id} tone="glass-soft" className="rounded-xl p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-50">
@@ -400,13 +373,19 @@ function TopChunksCard({
                     {hasReasons ? (
                       <div className="flex flex-wrap gap-2">
                         {reasons.emotions.map((e) => (
-                          <Chip key={`e:${c.id}:${e}`} label={`emotion:${e}`} />
+                          <Pill key={`e:${c.id}:${e}`} tone="strong" size="xs">
+                            emotion:{e}
+                          </Pill>
                         ))}
                         {reasons.people.map((p) => (
-                          <Chip key={`p:${c.id}:${p}`} label={`person:${p}`} />
+                          <Pill key={`p:${c.id}:${p}`} tone="strong" size="xs">
+                            person:{p}
+                          </Pill>
                         ))}
                         {reasons.keywords.map((k) => (
-                          <Chip key={`k:${c.id}:${k}`} label={`keyword:${k}`} />
+                          <Pill key={`k:${c.id}:${k}`} tone="strong" size="xs">
+                            keyword:{k}
+                          </Pill>
                         ))}
                       </div>
                     ) : (
@@ -415,7 +394,7 @@ function TopChunksCard({
                       </div>
                     )}
                   </div>
-                </div>
+                </Surface>
               );
             })}
           </div>
@@ -424,19 +403,9 @@ function TopChunksCard({
             No chunks returned.
           </div>
         )}
+        {payload ? <JsonDetails value={payload} /> : null}
       </div>
-
-      {payload ? (
-        <details className="mt-3 rounded-2xl border border-black/10 bg-white/40 px-4 py-3 text-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
-          <summary className="cursor-pointer select-none text-xs font-semibold text-zinc-700 dark:text-zinc-200">
-            Raw JSON
-          </summary>
-          <pre className="mt-3 overflow-x-auto rounded-xl bg-black/5 p-3 text-[12px] leading-5 text-zinc-900 dark:bg-white/5 dark:text-zinc-100">
-            {JSON.stringify(payload, null, 2)}
-          </pre>
-        </details>
-      ) : null}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -448,61 +417,47 @@ const SourcesCard = memo(function SourcesCard({
   if (!sources.length) return null;
 
   return (
-    <div className="w-full">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
-          Sources
-        </div>
-        <div className="shrink-0 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
-          {sources.length} shown
-        </div>
-      </div>
+    <SectionCard title="Sources" meta={`${sources.length} shown`}>
+      <div className="flex flex-col gap-4">
+        {sources.map((s) => {
+          const title =
+            (typeof s.title === "string" && s.title.trim()
+              ? s.title.trim()
+              : typeof s.source === "string" && s.source.trim()
+                ? s.source.trim()
+                : null) ?? `Chunk ${s.id}`;
+          const score =
+            typeof s.score === "number" && Number.isFinite(s.score)
+              ? s.score.toFixed(3)
+              : null;
+          const preview =
+            typeof s.preview === "string" && s.preview.trim() ? s.preview.trim() : null;
 
-      <div className="rounded-2xl border border-black/10 bg-white/60 p-4 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
-        <div className="flex flex-col gap-4">
-          {sources.map((s) => {
-            const title =
-              (typeof s.title === "string" && s.title.trim()
-                ? s.title.trim()
-                : typeof s.source === "string" && s.source.trim()
-                  ? s.source.trim()
-                  : null) ?? `Chunk ${s.id}`;
-            const score =
-              typeof s.score === "number" && Number.isFinite(s.score)
-                ? s.score.toFixed(3)
-                : null;
-            const preview =
-              typeof s.preview === "string" && s.preview.trim() ? s.preview.trim() : null;
-
-            return (
-              <div
-                key={s.id}
-                className="rounded-xl border border-black/10 bg-white/40 p-3 dark:border-white/10 dark:bg-white/5"
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-50">
-                    {title}
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-zinc-600 dark:text-zinc-400">
-                    <span className="font-mono">id {s.id}</span>
-                    {score ? <span className="font-mono">score {score}</span> : null}
-                    {typeof s.source === "string" && s.source.trim() ? (
-                      <span className="truncate">{s.source.trim()}</span>
-                    ) : null}
-                  </div>
+          return (
+            <Surface key={s.id} tone="glass-soft" className="rounded-xl p-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                  {title}
                 </div>
-
-                {preview ? (
-                  <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-900 dark:text-zinc-100">
-                    {preview.length > 600 ? `${preview.slice(0, 600)}…` : preview}
-                  </p>
-                ) : null}
+                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-zinc-600 dark:text-zinc-400">
+                  <span className="font-mono">id {s.id}</span>
+                  {score ? <span className="font-mono">score {score}</span> : null}
+                  {typeof s.source === "string" && s.source.trim() ? (
+                    <span className="truncate">{s.source.trim()}</span>
+                  ) : null}
+                </div>
               </div>
-            );
-          })}
-        </div>
+
+              {preview ? (
+                <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-900 dark:text-zinc-100">
+                  {preview.length > 600 ? `${preview.slice(0, 600)}…` : preview}
+                </p>
+              ) : null}
+            </Surface>
+          );
+        })}
       </div>
-    </div>
+    </SectionCard>
   );
 });
 
@@ -520,9 +475,7 @@ const MessageBubble = memo(function MessageBubble({
       }`}
     >
       {!isUser ? (
-        <div className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/60 text-[11px] font-semibold text-zinc-900 shadow-sm backdrop-blur sm:flex dark:border-white/10 dark:bg-white/5 dark:text-zinc-100">
-          R
-        </div>
+        <AvatarBadge>R</AvatarBadge>
       ) : null}
       <div
         className={`group relative max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${
@@ -555,9 +508,7 @@ const MessageBubble = memo(function MessageBubble({
         )}
       </div>
       {isUser ? (
-        <div className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/60 text-[11px] font-semibold text-zinc-900 shadow-sm backdrop-blur sm:flex dark:border-white/10 dark:bg-white/5 dark:text-zinc-100">
-          U
-        </div>
+        <AvatarBadge>U</AvatarBadge>
       ) : null}
     </div>
   );
@@ -568,18 +519,18 @@ const EmptyState = memo(function EmptyState() {
     <div className="mx-auto flex w-full max-w-xl flex-col items-center gap-3 px-6 py-14 text-center">
       <div className="relative">
         <div className="absolute -inset-10 rounded-full bg-[conic-gradient(from_220deg,rgba(0,110,255,0.22),rgba(255,135,0,0.18),rgba(0,110,255,0.22))] blur-2xl" />
-        <div className="relative rounded-2xl border border-black/10 bg-white/70 px-5 py-4 text-sm text-zinc-900 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-zinc-100">
+        <Surface
+          tone="glass"
+          className="relative bg-white/70 px-5 py-4 text-sm text-zinc-900 shadow-sm dark:bg-white/5 dark:text-zinc-100"
+        >
           Ask anything. This will retrieve Top Chunks and show them under the assistant response.
-        </div>
+        </Surface>
       </div>
       <div className="flex flex-wrap justify-center gap-2 pt-2 text-xs text-zinc-600 dark:text-zinc-400">
         {INPUT_HINTS.map((hint) => (
-          <span
-            key={hint}
-            className="rounded-full border border-black/10 bg-white/50 px-2 py-1 font-medium text-zinc-800 backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-zinc-200"
-          >
+          <Pill key={hint} tone="default" size="hint">
             &quot;{hint}&quot;
-          </span>
+          </Pill>
         ))}
       </div>
     </div>
@@ -739,13 +690,9 @@ export default function ChatClient() {
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onClear}
-          className="rounded-full border border-black/10 bg-white/60 px-3 py-1.5 text-xs font-semibold text-zinc-900 backdrop-blur transition hover:bg-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 dark:border-white/10 dark:bg-white/5 dark:text-zinc-100 dark:hover:bg-white/10 dark:focus-visible:ring-white/20"
-        >
+        <GlassButton onClick={onClear} size="xs">
           Clear
-        </button>
+        </GlassButton>
       </div>
 
       <div
@@ -756,23 +703,21 @@ export default function ChatClient() {
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
           {messagesCount <= 1 ? <EmptyState /> : null}
           {hiddenMessagesCount > 0 && !showAllMessages ? (
-            <button
-              type="button"
+            <GlassButton
               onClick={() => setShowAllMessages(true)}
-              className="mx-auto rounded-full border border-black/10 bg-white/60 px-3 py-1.5 text-[11px] font-semibold text-zinc-900 backdrop-blur transition hover:bg-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 dark:border-white/10 dark:bg-white/5 dark:text-zinc-100 dark:hover:bg-white/10 dark:focus-visible:ring-white/20"
+              size="xs"
+              className="mx-auto text-[11px]"
             >
               Show earlier messages ({hiddenMessagesCount} hidden)
-            </button>
+            </GlassButton>
           ) : null}
           {displayedMessages.map((m) => (
             <MessageBubble key={m.id} message={m} />
           ))}
           {isSending ? (
             <div className="flex items-end gap-3">
-              <div className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/60 text-[11px] font-semibold text-zinc-800 shadow-sm backdrop-blur sm:flex dark:border-white/10 dark:bg-white/5 dark:text-zinc-200">
-                R
-              </div>
-              <div className="rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm text-zinc-800 backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-zinc-200">
+              <AvatarBadge className="text-zinc-800 dark:text-zinc-200">R</AvatarBadge>
+              <div className="ch26-surface bg-white/70 px-4 py-3 text-sm text-zinc-800 dark:bg-white/5 dark:text-zinc-200">
                 <span className="inline-flex items-center gap-1">
                   <span className="h-1.5 w-1.5 animate-[pulse_1.1s_ease-in-out_infinite] rounded-full bg-zinc-500/70" />
                   <span className="h-1.5 w-1.5 animate-[pulse_1.1s_ease-in-out_infinite_0.2s] rounded-full bg-zinc-500/70" />
@@ -787,7 +732,7 @@ export default function ChatClient() {
 
       <div className="border-t border-black/10 bg-white/35 px-5 py-4 backdrop-blur dark:border-white/10 dark:bg-white/5">
         <div className="mx-auto w-full max-w-3xl">
-          <div className="group relative rounded-2xl border border-black/10 bg-white/70 shadow-sm backdrop-blur transition focus-within:bg-white/80 focus-within:shadow-[0_16px_44px_-30px_rgba(0,0,0,0.55)] dark:border-white/10 dark:bg-black/20 dark:focus-within:bg-black/25">
+          <div className="group relative ch26-surface bg-white/70 shadow-sm transition focus-within:bg-white/80 focus-within:shadow-[0_16px_44px_-30px_rgba(0,0,0,0.55)] dark:bg-black/20 dark:focus-within:bg-black/25">
             <textarea
               ref={textareaRef}
               value={input}
@@ -798,13 +743,13 @@ export default function ChatClient() {
               className="block w-full resize-none rounded-2xl bg-transparent px-4 py-3 pr-24 text-sm leading-6 text-zinc-950 outline-none placeholder:text-zinc-500 dark:text-zinc-50 dark:placeholder:text-zinc-400"
             />
             <div className="absolute right-2 top-2 flex items-center gap-2">
-              <button
-                type="button"
+              <GlassButton
                 onClick={onFocus}
-                className="hidden rounded-full border border-black/10 bg-white/60 px-3 py-2 text-xs font-semibold text-zinc-900 backdrop-blur transition hover:bg-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 sm:inline-flex dark:border-white/10 dark:bg-white/5 dark:text-zinc-100 dark:hover:bg-white/10 dark:focus-visible:ring-white/20"
+                size="xs"
+                className="hidden py-2 sm:inline-flex"
               >
                 Focus
-              </button>
+              </GlassButton>
               <button
                 type="button"
                 onClick={onSend}
