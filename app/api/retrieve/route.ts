@@ -6,9 +6,17 @@ import {
   type RetrievalFacets,
   type RankedChunk,
 } from "@/lib/retrieval/metadata-precedence";
+import {
+  FACET_LIMITS,
+  sanitizeEmotions,
+  sanitizeLowercaseStrings,
+  toNullable,
+} from "@/lib/retrieval/sanitize-facets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const MAX_QUERY_EMBEDDING_DIMS = 4096;
 
 type RetrieveRequest = {
   query: string;
@@ -36,23 +44,11 @@ function clampRatio(n: unknown, def: number): number {
   return n;
 }
 
-function normalizeLowerList(values: unknown): string[] {
-  if (!Array.isArray(values)) return [];
-  const out: string[] = [];
-  for (const v of values) {
-    if (typeof v !== "string") continue;
-    const s = v.trim().toLowerCase();
-    if (!s) continue;
-    out.push(s);
-  }
-  return Array.from(new Set(out));
-}
-
 function buildFacetOrFilter(facets: RetrievalFacets): Record<string, unknown> | null {
   const or: Record<string, unknown>[] = [];
-  const emotions = Array.isArray(facets.emotions) ? facets.emotions : [];
-  const people = normalizeLowerList(facets.people);
-  const keywords = normalizeLowerList(facets.keywords);
+  const emotions = facets.emotions ?? [];
+  const people = facets.people ?? [];
+  const keywords = facets.keywords ?? [];
 
   if (emotions.length) or.push({ emotions: { $in: emotions } });
   if (people.length) or.push({ people: { $in: people } });
@@ -63,7 +59,12 @@ function buildFacetOrFilter(facets: RetrievalFacets): Record<string, unknown> | 
 }
 
 function isNonEmptyNumberArray(x: unknown): x is number[] {
-  return Array.isArray(x) && x.length > 0 && x.every((v) => typeof v === "number" && Number.isFinite(v));
+  if (!Array.isArray(x) || x.length === 0) return false;
+  if (x.length > MAX_QUERY_EMBEDDING_DIMS) return false;
+  for (const v of x) {
+    if (typeof v !== "number" || !Number.isFinite(v)) return false;
+  }
+  return true;
 }
 
 function pickQueryText(query: string, gatekeeper: { reframed_query: string | null }): string {
@@ -115,10 +116,25 @@ export async function POST(req: Request) {
     return Response.json({ error: "`gatekeeper` object is required" }, { status: 400 });
   }
 
+  // If the caller sends a massive queryEmbedding, reject before scanning/using it.
+  const qe = (body as RetrieveRequest | null)?.queryEmbedding;
+  if (Array.isArray(qe) && qe.length > MAX_QUERY_EMBEDDING_DIMS) {
+    return Response.json(
+      { error: `\`queryEmbedding\` exceeds max dims (${MAX_QUERY_EMBEDDING_DIMS})` },
+      { status: 400 },
+    );
+  }
+
+  // Do not trust facets from the request body: sanitize to strings, validate emotions, and cap sizes.
+  const gate = gatekeeper as Record<string, unknown>;
+  const emotions = toNullable(sanitizeEmotions(gate.emotions, FACET_LIMITS.emotions));
+  const people = toNullable(sanitizeLowercaseStrings(gate.people, FACET_LIMITS.people));
+  const keywords = toNullable(sanitizeLowercaseStrings(gate.keywords, FACET_LIMITS.keywords));
+
   const facets: RetrievalFacets = {
-    emotions: Array.isArray(gatekeeper.emotions) ? (gatekeeper.emotions as GatekeeperMetadata["emotions"]) : null,
-    people: Array.isArray(gatekeeper.people) ? (gatekeeper.people as GatekeeperMetadata["people"]) : null,
-    keywords: Array.isArray(gatekeeper.keywords) ? (gatekeeper.keywords as GatekeeperMetadata["keywords"]) : null,
+    emotions,
+    people,
+    keywords,
     date_int: typeof gatekeeper.date_int === "number" ? gatekeeper.date_int : null,
   };
 
@@ -214,4 +230,3 @@ export async function POST(req: Request) {
     return Response.json({ error: msg }, { status: 500 });
   }
 }
-

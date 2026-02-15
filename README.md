@@ -33,14 +33,17 @@ This repo includes a backend route that uses Groq to extract nullable metadata f
 Env vars (see `.env.example`):
 
 - `GROQ_API_KEY` (required)
-- `GATEKEEPER_MODEL` (required)
+- `GATEKEEPER_MODEL` (optional, defaults to `llama3-8b-8192`; can also use `GROQ_MODEL`)
 - `GROQ_BASE_URL` (optional, defaults to `https://api.groq.com/openai/v1`)
+- `GROQ_TIMEOUT_MS` (optional, defaults to `20000`)
 - `OPENAI_API_KEY` (required if `embed` is true)
 - `OPENAI_EMBEDDING_MODEL` (optional, defaults to `text-embedding-3-small`)
 - `OPENAI_BASE_URL` (optional, defaults to `https://api.openai.com/v1`)
+- `OPENAI_TIMEOUT_MS` (optional, defaults to `20000`)
 - `PINECONE_API_KEY` (required for retrieval)
 - `PINECONE_INDEX_HOST` (required for retrieval)
 - `PINECONE_NAMESPACE` (optional)
+- `PINECONE_TIMEOUT_MS` (optional, defaults to `12000`)
 
 ## Learn More
 

@@ -619,8 +619,15 @@ export default function ChatClient() {
         retrieveError = "Gatekeeper returned no metadata (cannot retrieve).";
       }
 
+      const retrievedCount = retrievePayload?.chunks?.length ?? 0;
+      const assistantText = retrieveError
+        ? "Retrieval failed."
+        : retrievedCount > 0
+          ? `Retrieved ${retrievedCount} chunk${retrievedCount === 1 ? "" : "s"}.`
+          : "No chunks retrieved.";
+
       const assistantMsg: ChatMessage = {
-        ...createMessage("assistant", "Retrieved top chunks."),
+        ...createMessage("assistant", assistantText),
         gatekeeperPayload,
         retrievePayload,
         retrieveError,

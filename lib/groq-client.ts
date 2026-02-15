@@ -1,3 +1,5 @@
+import { fetchWithTimeout, isAbortError } from "@/lib/fetch-with-timeout";
+
 export type GroqChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
@@ -30,20 +32,39 @@ function getBaseUrl(): string {
   return raw.replace(/\/+$/, "");
 }
 
+function envTimeoutMs(name: string, def: number): number {
+  const raw = process.env[name];
+  if (!raw) return def;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return def;
+  return Math.trunc(n);
+}
+
 export async function groqChatCompletion(
   req: GroqChatCompletionRequest,
 ): Promise<{ content: string; rawText: string }> {
   const apiKey = requiredEnv("GROQ_API_KEY");
   const baseUrl = getBaseUrl();
+  const timeoutMs = envTimeoutMs("GROQ_TIMEOUT_MS", 20_000);
 
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(req),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      `${baseUrl}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(req),
+      },
+      { timeoutMs },
+    );
+  } catch (e) {
+    if (isAbortError(e)) throw new Error("Groq request timed out");
+    throw e;
+  }
 
   const rawText = await res.text();
   let json: GroqChatCompletionResponse | null = null;
@@ -62,4 +83,3 @@ export async function groqChatCompletion(
   if (!content) throw new Error("Groq API returned empty completion content");
   return { content, rawText };
 }
-

@@ -1,3 +1,5 @@
+import { fetchWithTimeout, isAbortError } from "@/lib/fetch-with-timeout";
+
 type PineconeMetadata = Record<string, unknown>;
 
 export type PineconeMatch = {
@@ -21,6 +23,14 @@ type PineconeQueryResponse = {
   usage?: unknown;
   error?: { message?: string } | string;
 };
+
+function envTimeoutMs(name: string, def: number): number {
+  const raw = process.env[name];
+  if (!raw) return def;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return def;
+  return Math.trunc(n);
+}
 
 function requiredEnv(name: string): string {
   const v = process.env[name];
@@ -46,6 +56,7 @@ export async function pineconeQuery(opts: {
 }): Promise<{ matches: PineconeMatch[] }> {
   const apiKey = requiredEnv("PINECONE_API_KEY");
   const host = getIndexHost();
+  const timeoutMs = envTimeoutMs("PINECONE_TIMEOUT_MS", 12_000);
 
   const body: PineconeQueryRequest = {
     vector: opts.vector,
@@ -56,15 +67,25 @@ export async function pineconeQuery(opts: {
   if (typeof opts.namespace === "string" && opts.namespace.trim()) body.namespace = opts.namespace.trim();
   if (opts.filter && Object.keys(opts.filter).length) body.filter = opts.filter;
 
-  const res = await fetch(`${host}/query`, {
-    method: "POST",
-    headers: {
-      "Api-Key": apiKey,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      `${host}/query`,
+      {
+        method: "POST",
+        headers: {
+          "Api-Key": apiKey,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+      { timeoutMs },
+    );
+  } catch (e) {
+    if (isAbortError(e)) throw new Error("Pinecone query timed out");
+    throw e;
+  }
 
   const text = await res.text();
   let json: PineconeQueryResponse | null = null;
@@ -86,4 +107,3 @@ export async function pineconeQuery(opts: {
   const matches = Array.isArray(json?.matches) ? json.matches.filter((m) => !!m && typeof m.id === "string") : [];
   return { matches };
 }
-
