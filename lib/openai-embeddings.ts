@@ -1,6 +1,6 @@
 import { fetchWithTimeout, isAbortError } from "@/lib/fetch-with-timeout";
 import { HttpError } from "@/lib/http-error";
-import { getOpenAISemaphore } from "@/lib/llm-concurrency";
+import { getOpenAIRateGate, getOpenAISemaphore } from "@/lib/llm-concurrency";
 import { logEvent } from "@/lib/log";
 import { envInt, expBackoffMs, parseRetryAfterMs, sleepMs } from "@/lib/retry";
 
@@ -41,7 +41,10 @@ type EmbeddingCacheEntry = { expiresAt: number; model: string; embedding: number
 const embeddingCache = new Map<string, EmbeddingCacheEntry>();
 const embeddingInflight = new Map<string, Promise<{ model: string; embedding: number[] }>>();
 
-export async function openaiEmbedText(input: string, opts?: { model?: string; dimensions?: number }) {
+export async function openaiEmbedText(
+  input: string,
+  opts?: { model?: string; dimensions?: number; requestId?: string; purpose?: string },
+) {
   const apiKey = requiredEnv("OPENAI_API_KEY");
   const baseUrl = getBaseUrl();
   const model = opts?.model || process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small";
@@ -53,11 +56,24 @@ export async function openaiEmbedText(input: string, opts?: { model?: string; di
   const cacheKey = `${model}::${typeof opts?.dimensions === "number" ? opts.dimensions : ""}::${input}`;
   if (cacheTtlMs > 0) {
     const cached = embeddingCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) return { model: cached.model, embedding: cached.embedding };
+    if (cached && cached.expiresAt > Date.now()) {
+      logEvent("info", "embeddings.cache_hit", {
+        requestId: opts?.requestId,
+        model,
+        ttlMs: cacheTtlMs,
+      });
+      return { model: cached.model, embedding: cached.embedding };
+    }
     if (cached) embeddingCache.delete(cacheKey);
 
     const inflight = embeddingInflight.get(cacheKey);
-    if (inflight) return await inflight;
+    if (inflight) {
+      logEvent("info", "embeddings.inflight_join", {
+        requestId: opts?.requestId,
+        model,
+      });
+      return await inflight;
+    }
   }
 
   const body: OpenAIEmbeddingsRequest = {
@@ -78,9 +94,19 @@ export async function openaiEmbedText(input: string, opts?: { model?: string; di
           const waitMs = Date.now() - queueStart;
           if (waitMs >= 25) {
             logEvent("info", "llm.queue_wait", {
+              requestId: opts?.requestId,
               provider: "openai",
-              purpose: "embeddings",
+              purpose: opts?.purpose || "embeddings",
               waitMs,
+            });
+          }
+          const rateWaitMs = await getOpenAIRateGate().wait();
+          if (rateWaitMs >= 25) {
+            logEvent("info", "llm.rate_wait", {
+              requestId: opts?.requestId,
+              provider: "openai",
+              purpose: opts?.purpose || "embeddings",
+              waitMs: rateWaitMs,
             });
           }
           res = await fetchWithTimeout(
@@ -134,8 +160,9 @@ export async function openaiEmbedText(input: string, opts?: { model?: string; di
         if (retryable && attempt < maxRetries) {
           const delay = Math.min(10_000, retryAfterMs ?? expBackoffMs(attempt));
           logEvent("warn", "llm.retry", {
+            requestId: opts?.requestId,
             provider: "openai",
-            purpose: "embeddings",
+            purpose: opts?.purpose || "embeddings",
             attempt,
             status: res.status,
             delayMs: delay,

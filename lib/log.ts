@@ -15,7 +15,7 @@ export function logEvent(
   event: string,
   fields: Record<string, unknown> & { requestId?: string },
 ) {
-  if (!isEnabled()) return;
+  if (!isEnabled() && level === "info") return;
   const payload = {
     ts: new Date().toISOString(),
     level,

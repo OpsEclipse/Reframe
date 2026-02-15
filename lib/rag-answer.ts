@@ -15,6 +15,13 @@ export type ChatGenerateRequest = {
 
 export type ChatGenerateDebug = {
   rewritten_query?: string;
+  llm?: {
+    provider_preference?: "auto" | "openai" | "groq";
+    used_provider?: "openai" | "groq" | null;
+    used_model?: string | null;
+    primary_model?: string;
+    fallback_model?: string;
+  };
   gatekeeper?: {
     skip_RAG: boolean;
     reframed_query: string | null;
@@ -33,6 +40,7 @@ export type ChatGenerateDebug = {
 export type ChatGenerateResponse = {
   answer: string;
   sources: SourceCitation[];
+  requestId?: string;
   debug?: ChatGenerateDebug;
 };
 
@@ -142,4 +150,3 @@ export function parseChatGenerateModelOutput(rawText: string): { answer: string;
 
   return { answer, sources: sourcesOut };
 }
-

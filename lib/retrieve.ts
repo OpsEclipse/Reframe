@@ -28,6 +28,7 @@ export type RetrieveInput = {
     // Accept the full gatekeeper object so callers can include skip_RAG if they have it.
     skip_RAG?: boolean;
   };
+  requestId?: string; // logging/correlation only
   queryEmbedding?: number[];
   top_k?: number;
   base_top_k?: number;
@@ -160,7 +161,10 @@ export async function runRetrieval(input: RetrieveInput): Promise<RetrieveRespon
   if (isNonEmptyNumberArray(input.queryEmbedding)) {
     vector = input.queryEmbedding!;
   } else {
-    const embedded = await openaiEmbedText(rewritten_query);
+    const embedded = await openaiEmbedText(rewritten_query, {
+      requestId: input.requestId,
+      purpose: "retrieve_embed",
+    });
     vector = embedded.embedding;
   }
 
@@ -233,4 +237,3 @@ export async function runRetrieval(input: RetrieveInput): Promise<RetrieveRespon
     chunks: out,
   };
 }
-

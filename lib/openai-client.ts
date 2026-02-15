@@ -1,6 +1,6 @@
 import { fetchWithTimeout, isAbortError } from "@/lib/fetch-with-timeout";
 import { HttpError } from "@/lib/http-error";
-import { getOpenAISemaphore } from "@/lib/llm-concurrency";
+import { getOpenAIRateGate, getOpenAISemaphore } from "@/lib/llm-concurrency";
 import { logEvent } from "@/lib/log";
 import { envInt, expBackoffMs, parseRetryAfterMs, sleepMs } from "@/lib/retry";
 
@@ -67,6 +67,15 @@ export async function openaiChatCompletion(
             provider: "openai",
             purpose: opts?.purpose,
             waitMs,
+          });
+        }
+        const rateWaitMs = await getOpenAIRateGate().wait();
+        if (rateWaitMs >= 25) {
+          logEvent("info", "llm.rate_wait", {
+            requestId: opts?.requestId,
+            provider: "openai",
+            purpose: opts?.purpose,
+            waitMs: rateWaitMs,
           });
         }
         res = await fetchWithTimeout(

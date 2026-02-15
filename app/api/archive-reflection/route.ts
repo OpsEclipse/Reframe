@@ -83,17 +83,63 @@ function stripCodeFences(text: string): string {
   return text.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
 }
 
+function extractLastJsonObject(text: string): string {
+  // Extract the last {...} JSON object in `text` while respecting strings/escapes.
+  let inString = false;
+  let escape = false;
+  let depth = 0;
+  let end = -1;
+  let start = -1;
+
+  for (let i = text.length - 1; i >= 0; i--) {
+    const ch = text[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escape = true;
+        continue;
+      }
+      if (ch === "\"") inString = false;
+      continue;
+    }
+
+    if (ch === "\"") {
+      inString = true;
+      escape = false;
+      continue;
+    }
+
+    if (ch === "}") {
+      if (end === -1) end = i;
+      depth++;
+      continue;
+    }
+    if (ch === "{") {
+      depth--;
+      if (depth === 0 && end !== -1) {
+        start = i;
+        break;
+      }
+      continue;
+    }
+  }
+
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error("No JSON object found in model output");
+  }
+  return text.slice(start, end + 1);
+}
+
 function parseModelJson(text: string): unknown {
   const cleaned = stripCodeFences(text).trim();
   try {
     return JSON.parse(cleaned);
   } catch {
-    const first = cleaned.indexOf("{");
-    const last = cleaned.lastIndexOf("}");
-    if (first !== -1 && last !== -1 && last > first) {
-      return JSON.parse(cleaned.slice(first, last + 1));
-    }
-    throw new Error("Model did not return JSON.");
+    const lastObj = extractLastJsonObject(cleaned);
+    return JSON.parse(lastObj);
   }
 }
 
@@ -111,7 +157,13 @@ export async function POST(req: Request) {
     return Response.json({ error: stableErrorMessage("misconfigured") }, { status: 500 });
   }
 
-  const modelName = process.env.MAIN_LLM_MODEL || "llama-3.3-70b-versatile";
+  // This endpoint always routes to Groq (OpenAI-compatible). Prefer Groq-scoped model env vars.
+  const modelName =
+    (process.env.ARCHIVE_REFLECTION_MODEL || "").trim() ||
+    (process.env.MAIN_LLM_FALLBACK_MODEL || "").trim() ||
+    (process.env.GROQ_MODEL || "").trim() ||
+    (process.env.MAIN_LLM_MODEL || "").trim() ||
+    "llama-3.3-70b-versatile";
 
   const seedPrompts = [
     "Write a reflection that highlights how you've changed over the last year, with evidence from your entries.",
@@ -173,18 +225,38 @@ export async function POST(req: Request) {
   try {
     // Use plain text generation and parse JSON ourselves.
     // This avoids Groq models that do not support `response_format: { type: "json_schema" }`.
-    const result = await generateText({
-      // Groq is OpenAI-compatible; treat it as an OpenAI chat model.
-      model: groqOpenAI.chat(modelName as never),
-      temperature: 0,
-      maxOutputTokens: 1300,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: JSON.stringify(promptPayload) },
-      ],
-    });
+    const runOnce = async (repairHint?: string) => {
+      const messages = [
+        { role: "system" as const, content: system },
+        { role: "user" as const, content: JSON.stringify(promptPayload) },
+      ];
+      if (repairHint) messages.push({ role: "user" as const, content: repairHint });
 
-    const parsed = parseModelJson(result.text);
+      return await generateText({
+        // Groq is OpenAI-compatible; treat it as an OpenAI chat model.
+        model: groqOpenAI.chat(modelName as never),
+        temperature: 0,
+        maxOutputTokens: 1300,
+        messages,
+      });
+    };
+
+    const result = await runOnce();
+
+    let parsed: unknown;
+    try {
+      parsed = parseModelJson(result.text);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Invalid JSON";
+      // One repair retry: ask the model to re-emit valid JSON only.
+      const hint =
+        "Your previous response was invalid JSON (" +
+        msg +
+        "). Output ONLY corrected JSON that matches the schema. Use double quotes, no trailing commas.";
+      const repaired = await runOnce(hint);
+      parsed = parseModelJson(repaired.text);
+    }
+
     const validated = ArchiveReflectionSchema.safeParse(parsed);
     if (!validated.success) {
       console.error("[api/archive-reflection] invalid model JSON:", validated.error.flatten());

@@ -1,6 +1,6 @@
 import { fetchWithTimeout, isAbortError } from "@/lib/fetch-with-timeout";
 import { HttpError } from "@/lib/http-error";
-import { getGroqSemaphore } from "@/lib/llm-concurrency";
+import { getGroqRateGate, getGroqSemaphore } from "@/lib/llm-concurrency";
 import { logEvent } from "@/lib/log";
 import { envInt, expBackoffMs, parseRetryAfterMs, sleepMs } from "@/lib/retry";
 
@@ -68,6 +68,15 @@ export async function groqChatCompletion(
             provider: "groq",
             purpose: opts?.purpose,
             waitMs,
+          });
+        }
+        const rateWaitMs = await getGroqRateGate().wait();
+        if (rateWaitMs >= 25) {
+          logEvent("info", "llm.rate_wait", {
+            requestId: opts?.requestId,
+            provider: "groq",
+            purpose: opts?.purpose,
+            waitMs: rateWaitMs,
           });
         }
         res = await fetchWithTimeout(

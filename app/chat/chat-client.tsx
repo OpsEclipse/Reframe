@@ -159,9 +159,21 @@ async function callChat(query: string): Promise<ChatGenerateResponse> {
 
     const json: unknown = await res.json().catch(() => null);
     if (!res.ok) {
+      const requestId =
+        (isRecord(json) && typeof json.requestId === "string" && json.requestId.trim()
+          ? json.requestId.trim()
+          : res.headers.get("X-Request-Id")) || "";
+      const provider =
+        isRecord(json) && typeof json.provider === "string" && json.provider.trim()
+          ? json.provider.trim()
+          : "";
       const msg =
         isRecord(json) && typeof json.error === "string" ? json.error : `HTTP ${res.status}`;
-      throw new Error(msg);
+      throw new Error(
+        [msg, provider ? `(provider=${provider})` : null, requestId ? `(requestId=${requestId})` : null]
+          .filter(Boolean)
+          .join(" "),
+      );
     }
     if (!isRecord(json)) throw new Error("Empty/invalid response from /api/chat");
     return json as ChatGenerateResponse;

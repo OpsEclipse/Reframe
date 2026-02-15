@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     }
 
     const rewritten_query = meta.reframed_query?.trim() ? meta.reframed_query.trim() : query.trim();
-    const { model, embedding } = await openaiEmbedText(rewritten_query);
+    const { model, embedding } = await openaiEmbedText(rewritten_query, { requestId, purpose: "gatekeeper_embed" });
     const includeVector = body?.include_embedding_vector === true;
 
     logEvent("info", "gatekeeper_api.complete", {
@@ -71,6 +71,13 @@ export async function POST(req: Request) {
     );
   } catch (e) {
     if (e instanceof HttpError) {
+      logEvent(e.status === 429 ? "warn" : "error", "upstream.http_error", {
+        requestId,
+        provider: e.provider,
+        status: e.status,
+        retryAfterMs: e.retryAfterMs,
+        error: e.message,
+      });
       const headers = new Headers();
       if (typeof e.retryAfterMs === "number") headers.set("Retry-After", String(Math.ceil(e.retryAfterMs / 1000)));
       headers.set("X-Request-Id", requestId);

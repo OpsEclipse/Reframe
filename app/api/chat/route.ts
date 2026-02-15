@@ -41,10 +41,26 @@ function stableErrorMessage(kind: "retrieval" | "llm" | "bad_request"): string {
 
 function responseForUpstreamError(e: unknown, kind: "retrieval" | "llm", requestId: string) {
   if (e instanceof HttpError && e.status === 429) {
+    logEvent("warn", "upstream.rate_limited", {
+      requestId,
+      kind,
+      provider: e.provider,
+      retryAfterMs: e.retryAfterMs,
+    });
     const headers = new Headers();
     if (typeof e.retryAfterMs === "number") headers.set("Retry-After", String(Math.ceil(e.retryAfterMs / 1000)));
     headers.set("X-Request-Id", requestId);
     return Response.json({ error: "Rate limited.", provider: e.provider, requestId }, { status: 429, headers });
+  }
+  if (e instanceof HttpError) {
+    logEvent("error", "upstream.http_error", {
+      requestId,
+      kind,
+      provider: e.provider,
+      status: e.status,
+      retryAfterMs: e.retryAfterMs,
+      error: e.message,
+    });
   }
   return Response.json({ error: stableErrorMessage(kind), requestId }, { status: 502, headers: { "X-Request-Id": requestId } });
 }
@@ -107,6 +123,7 @@ export async function POST(req: Request) {
       query,
       gatekeeper: gatekeeperMeta,
       top_k: topK,
+      requestId,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
@@ -137,7 +154,15 @@ export async function POST(req: Request) {
   }
 
   const model = (process.env.MAIN_LLM_MODEL || "").trim() || "gpt-4o";
-  const fallbackModel = (process.env.MAIN_LLM_FALLBACK_MODEL || "").trim() || "llama-3.3-70b-versatile";
+  // "Fallback model" is what we use when routing to the Groq-compatible client.
+  // If MAIN_LLM_FALLBACK_MODEL is unset, fall back to GROQ_MODEL for consistency with Gatekeeper.
+  const fallbackModel =
+    (process.env.MAIN_LLM_FALLBACK_MODEL || "").trim() ||
+    (process.env.GROQ_MODEL || "").trim() ||
+    "llama-3.3-70b-versatile";
+  const providerPrefRaw = (process.env.MAIN_LLM_PROVIDER || "").trim().toLowerCase();
+  const providerPref: "auto" | "openai" | "groq" =
+    providerPrefRaw === "openai" || providerPrefRaw === "groq" ? providerPrefRaw : "auto";
   const system = buildMainChatSystemPrompt();
 
   const baseReq = {
@@ -152,17 +177,19 @@ export async function POST(req: Request) {
   let completion: { content: string } | null = null;
   let lastErr: unknown = null;
   let usedProvider: "openai" | "groq" | null = null;
+  let usedModel: string | null = null;
 
   const openAiRouteRetries = Math.max(0, envInt("MAIN_LLM_OPENAI_ROUTE_MAX_RETRIES", 1));
   const tLlmStart = Date.now();
 
-  if (hasOpenAI) {
+  if (hasOpenAI && providerPref !== "groq") {
     try {
       completion = await openaiChatCompletion(
         { ...baseReq, model, response_format: { type: "json_object" } },
         { maxRetries: openAiRouteRetries, requestId, purpose: "chat_main" },
       );
       usedProvider = "openai";
+      usedModel = model;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
       // If the provider/model rejects response_format, retry without it (prompt still enforces JSON-only).
@@ -173,6 +200,7 @@ export async function POST(req: Request) {
             { maxRetries: openAiRouteRetries, requestId, purpose: "chat_main" },
           );
           usedProvider = "openai";
+          usedModel = model;
         } catch (e2) {
           lastErr = e2;
         }
@@ -182,7 +210,7 @@ export async function POST(req: Request) {
     }
   }
 
-  if (!completion && hasGroq) {
+  if (!completion && hasGroq && providerPref !== "openai") {
     if (hasOpenAI && lastErr) {
       logEvent("warn", "chat.fallback", {
         requestId,
@@ -199,6 +227,7 @@ export async function POST(req: Request) {
         { requestId, purpose: "chat_main_fallback" },
       );
       usedProvider = "groq";
+      usedModel = fallbackModel;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
       if (msg.toLowerCase().includes("response_format") || msg.toLowerCase().includes("json_object")) {
@@ -208,6 +237,7 @@ export async function POST(req: Request) {
             { requestId, purpose: "chat_main_fallback" },
           );
           usedProvider = "groq";
+          usedModel = fallbackModel;
         } catch (e2) {
           lastErr = e2;
         }
@@ -262,9 +292,17 @@ export async function POST(req: Request) {
   const response: ChatGenerateResponse = {
     answer,
     sources: mappedSources,
+    requestId,
     debug: includeDebug
       ? {
           rewritten_query: retrieval.rewritten_query ?? undefined,
+          llm: {
+            provider_preference: providerPref,
+            used_provider: usedProvider,
+            used_model: usedModel,
+            primary_model: model,
+            fallback_model: fallbackModel,
+          },
           gatekeeper: gatekeeperMeta,
           retrieval: {
             rewritten_query: retrieval.rewritten_query,
@@ -279,6 +317,7 @@ export async function POST(req: Request) {
   logEvent("info", "chat.complete", {
     requestId,
     usedProvider,
+    usedModel,
     model,
     fallbackModel,
     gatekeeperMs,
