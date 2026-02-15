@@ -20,6 +20,25 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Gatekeeper (Groq) API
+
+This repo includes a backend route that uses Groq to extract nullable metadata from a query, then embeds the rewritten query using OpenAI (`text-embedding-3-*`).
+
+- Endpoint: `POST /api/gatekeeper`
+- Body: `{ "query": string, "timezone"?: string, "embed"?: boolean, "include_embedding_vector"?: boolean }`
+- Response (default): `{ "gatekeeper": { reframed_query, emotions, people, keywords, date_int }, "rewritten_query": string, "embedding": { "model": string, "dims": number } }`
+- Response (`include_embedding_vector=true`): `{ "gatekeeper": { ... }, "rewritten_query": string, "embedding": { "model": string, "dims": number, "vector": number[] } }`
+- Response (`embed=false`): `{ "gatekeeper": { ... } }`
+
+Env vars (see `.env.example`):
+
+- `GROQ_API_KEY` (required)
+- `GATEKEEPER_MODEL` (required)
+- `GROQ_BASE_URL` (optional, defaults to `https://api.groq.com/openai/v1`)
+- `OPENAI_API_KEY` (required if `embed` is true)
+- `OPENAI_EMBEDDING_MODEL` (optional, defaults to `text-embedding-3-small`)
+- `OPENAI_BASE_URL` (optional, defaults to `https://api.openai.com/v1`)
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
