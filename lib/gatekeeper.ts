@@ -15,6 +15,9 @@ export const ALLOWED_EMOTIONS = [
 export type AllowedEmotion = (typeof ALLOWED_EMOTIONS)[number];
 
 export type GatekeeperMetadata = {
+  // True when the user query should NOT trigger retrieval (RAG).
+  // Example: greetings, small talk, or requests unrelated to the corpus.
+  skip_RAG: boolean;
   // Null unless reframing is needed for retrieval.
   reframed_query: string | null;
   // Null unless at least one emotion is clearly expressed.
@@ -123,6 +126,19 @@ function validateGatekeeperMetadata(raw: unknown): GatekeeperMetadata {
   if (!raw || typeof raw !== "object") throw new Error("Gatekeeper JSON must be an object");
   const r = raw as Record<string, unknown>;
 
+  let skip_RAG = false;
+  if (typeof r.skip_RAG === "boolean") {
+    skip_RAG = r.skip_RAG;
+  } else if (typeof r.skip_RAG === "string") {
+    const v = r.skip_RAG.trim().toLowerCase();
+    if (v === "true") skip_RAG = true;
+    if (v === "false") skip_RAG = false;
+  } else if (typeof r.skip_RAG === "number") {
+    // Be forgiving if the model emits 0/1.
+    if (r.skip_RAG === 1) skip_RAG = true;
+    if (r.skip_RAG === 0) skip_RAG = false;
+  }
+
   const reframed_query =
     r.reframed_query === null
       ? null
@@ -161,7 +177,11 @@ function validateGatekeeperMetadata(raw: unknown): GatekeeperMetadata {
     if (Number.isInteger(n) && n >= 19000101 && n <= 21001231) date_int = n;
   }
 
-  return { reframed_query, emotions, people, keywords, date_int };
+  return { skip_RAG, reframed_query, emotions, people, keywords, date_int };
+}
+
+export function parseGatekeeperMetadata(raw: unknown): GatekeeperMetadata {
+  return validateGatekeeperMetadata(raw);
 }
 
 export async function gatekeepQuery(input: GatekeeperInput): Promise<GatekeeperMetadata> {
@@ -182,7 +202,7 @@ export async function gatekeepQuery(input: GatekeeperInput): Promise<GatekeeperM
     "Return ONLY a single JSON object and nothing else.",
     "",
     "Schema (all keys required; use null when not present):",
-    '{ "reframed_query": string|null, "emotions": string[]|null, "people": string[]|null, "keywords": string[]|null, "date_int": number|null }',
+    '{ "skip_RAG": boolean, "reframed_query": string|null, "emotions": string[]|null, "people": string[]|null, "keywords": string[]|null, "date_int": number|null }',
     "",
     "Emotion definitions (choose from the allowed list only; use these meanings):",
     "- Joy: wins, celebrations, excitement, or general happiness.",
@@ -196,6 +216,8 @@ export async function gatekeepQuery(input: GatekeeperInput): Promise<GatekeeperM
     "- Neutral: factual/log-like entries with no clear emotional valence (e.g., \"I went to the store, then home\").",
     "",
     "Rules:",
+    "- skip_RAG: set to true ONLY when the query should not run retrieval (RAG), e.g. greetings/small-talk/pleasantries or requests unrelated to the corpus. Otherwise false.",
+    "- If skip_RAG is true, set reframed_query/emotions/people/keywords/date_int to null.",
     `- emotions: only choose from this exact list: ${ALLOWED_EMOTIONS.join(", ")}.`,
     "- emotions must be null unless at least one emotion is clearly expressed.",
     "- If the text is explicitly factual/log-like with no emotional valence, you may return emotions: [\"Neutral\"]. Otherwise, prefer null over guessing.",
@@ -233,5 +255,5 @@ export async function gatekeepQuery(input: GatekeeperInput): Promise<GatekeeperM
   }
 
   const raw = extractJsonObject(completion.content);
-  return validateGatekeeperMetadata(raw);
+  return parseGatekeeperMetadata(raw);
 }

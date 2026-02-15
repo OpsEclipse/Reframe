@@ -30,10 +30,39 @@ This repo includes a backend route that uses Groq to extract nullable metadata f
 - Response (`include_embedding_vector=true`): `{ "gatekeeper": { ... }, "rewritten_query": string, "embedding": { "model": string, "dims": number, "vector": number[] } }`
 - Response (`embed=false`): `{ "gatekeeper": { ... } }`
 
+## Chat (RAG-to-LLM) API
+
+Single orchestration route that runs:
+
+1. Gatekeeper (metadata + rewritten query decision)
+2. Retrieval (top 12 chunks)
+3. Main LLM generation (JSON-only output)
+
+- Endpoint: `POST /api/chat`
+- Body: `{ "query": string, "top_k"?: number, "timezone"?: string }`
+  - `top_k` is accepted but the pipeline always retrieves/uses up to the top `12` chunks
+- Response:
+  - `answer: string`
+  - `sources: Array<{ id: string, title?: string|null, source?: string|null, score: number|null, preview?: string|null, metadata?: Record<string, unknown> }>`
+  - `debug?: { gatekeeper, rewritten_query, retrieval }` (only when `CHAT_DEBUG=1`)
+
+Example response:
+
+```json
+{
+  "answer": "…",
+  "sources": [
+    { "id": "chunk_123", "title": "…", "source": "…", "score": 0.92, "preview": "…" }
+  ]
+}
+```
+
 Env vars (see `.env.example`):
 
 - `GROQ_API_KEY` (required)
 - `GATEKEEPER_MODEL` (optional, defaults to `llama3-8b-8192`; can also use `GROQ_MODEL`)
+- `MAIN_LLM_MODEL` (optional, defaults to `llama-3.3-70b-versatile`)
+- `CHAT_DEBUG` (optional, set to `1` to include `debug` fields in `/api/chat` responses)
 - `GROQ_BASE_URL` (optional, defaults to `https://api.groq.com/openai/v1`)
 - `GROQ_TIMEOUT_MS` (optional, defaults to `20000`)
 - `OPENAI_API_KEY` (required if `embed` is true)

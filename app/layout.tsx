@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, IBM_Plex_Mono, Instrument_Sans } from "next/font/google";
 import "./globals.css";
+import { CrtFrame } from "@/app/components/crt-frame";
 
 const instrumentSans = Instrument_Sans({
   variable: "--font-instrument-sans",
@@ -33,7 +34,7 @@ export default function RootLayout({
       <body
         className={`${instrumentSans.variable} ${fraunces.variable} ${plexMono.variable} antialiased`}
       >
-        {children}
+        <CrtFrame>{children}</CrtFrame>
       </body>
     </html>
   );

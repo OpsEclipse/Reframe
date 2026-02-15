@@ -3,7 +3,7 @@ import Link from "next/link";
 import ChatClient from "./chat-client";
 
 const pageBackgroundClasses =
-  "min-h-screen bg-[radial-gradient(1000px_520px_at_10%_0%,rgba(0,110,255,0.14),transparent_60%),radial-gradient(900px_540px_at_95%_18%,rgba(255,135,0,0.16),transparent_58%),radial-gradient(700px_420px_at_50%_100%,rgba(0,0,0,0.08),transparent_55%),linear-gradient(to_bottom,#fcfbf7,#f4f4f5)] dark:bg-[radial-gradient(1000px_520px_at_10%_0%,rgba(0,110,255,0.18),transparent_60%),radial-gradient(900px_540px_at_95%_18%,rgba(255,135,0,0.16),transparent_58%),radial-gradient(700px_420px_at_50%_100%,rgba(255,255,255,0.08),transparent_55%),linear-gradient(to_bottom,#050505,#0b0b0c)]";
+  "min-h-full bg-[radial-gradient(1000px_520px_at_10%_0%,rgba(0,110,255,0.14),transparent_60%),radial-gradient(900px_540px_at_95%_18%,rgba(255,135,0,0.16),transparent_58%),radial-gradient(700px_420px_at_50%_100%,rgba(0,0,0,0.08),transparent_55%),linear-gradient(to_bottom,#fcfbf7,#f4f4f5)] dark:bg-[radial-gradient(1000px_520px_at_10%_0%,rgba(0,110,255,0.18),transparent_60%),radial-gradient(900px_540px_at_95%_18%,rgba(255,135,0,0.16),transparent_58%),radial-gradient(700px_420px_at_50%_100%,rgba(255,255,255,0.08),transparent_55%),linear-gradient(to_bottom,#050505,#0b0b0c)]";
 const shellPanelClasses =
   "relative flex-1 overflow-hidden rounded-[28px] border border-black/10 bg-white/55 shadow-[0_18px_42px_-22px_rgba(0,0,0,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-[0_18px_42px_-22px_rgba(0,0,0,0.85)]";
 
@@ -15,7 +15,7 @@ export const metadata: Metadata = {
 export default function ChatPage() {
   return (
     <div className={pageBackgroundClasses}>
-      <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-10 sm:px-6">
+      <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-4 py-10 sm:px-6">
         <header className="mb-6 flex items-center justify-between">
           <div className="flex items-baseline gap-3">
             <h1 className="text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 sm:text-2xl">

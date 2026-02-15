@@ -10,6 +10,8 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import type { ChatGenerateResponse, SourceCitation } from "@/lib/rag-answer";
+import { normalizeSourceCitations } from "@/app/chat/source-citations";
 
 type Role = "user" | "assistant";
 
@@ -18,12 +20,14 @@ type ChatMessage = {
   role: Role;
   content: string;
   createdAt: number;
+  sources?: SourceCitation[] | null;
   gatekeeperPayload?: GatekeeperApiResponse | null;
   retrievePayload?: RetrieveApiResponse | null;
   retrieveError?: string | null;
 };
 
 type GatekeeperMetadata = {
+  skip_RAG: boolean;
   reframed_query: string | null;
   emotions: string[] | null;
   people: string[] | null;
@@ -81,9 +85,9 @@ const INPUT_HINTS = [
   "Find code references",
 ];
 const EMPTY_MESSAGE_FOOTER =
-  "Currently: calls /api/gatekeeper then /api/retrieve and shows Top Chunks under the assistant response.";
+  "Currently: calls /api/chat and shows parsed Sources under the assistant response.";
 const initialAssistantMessage =
-  "Ask a question. This calls `/api/gatekeeper` then `/api/retrieve`, and shows Top Chunks under the assistant response.";
+  "Ask a question. This calls `/api/chat` (gatekeeper + retrieve + generate) and renders Sources under the assistant response.";
 
 // Keep initial render deterministic to avoid hydration mismatches.
 const WELCOME_MESSAGES: ChatMessage[] = [
@@ -121,39 +125,12 @@ function createMessage(role: Role, content: string): ChatMessage {
   };
 }
 
-async function callGatekeeper(query: string): Promise<GatekeeperApiResponse | null> {
+async function callChat(query: string): Promise<ChatGenerateResponse> {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const res = await fetch("/api/gatekeeper", {
+  const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      query,
-      timezone,
-      // Retrieval will embed (once). Avoid duplicating embeddings by disabling it here.
-      embed: false,
-      include_embedding_vector: false,
-    }),
-  });
-  const json: unknown = await res.json().catch(() => null);
-  if (!res.ok) {
-    const msg =
-      isRecord(json) && typeof json.error === "string" ? json.error : `HTTP ${res.status}`;
-    throw new Error(msg);
-  }
-  return isRecord(json) ? (json as GatekeeperApiResponse) : null;
-}
-
-async function callRetrieve(opts: {
-  query: string;
-  gatekeeper: GatekeeperMetadata;
-}): Promise<RetrieveApiResponse | null> {
-  const res = await fetch("/api/retrieve", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      query: opts.query,
-      gatekeeper: opts.gatekeeper,
-    }),
+    body: JSON.stringify({ query, timezone }),
   });
 
   const json: unknown = await res.json().catch(() => null);
@@ -162,7 +139,8 @@ async function callRetrieve(opts: {
       isRecord(json) && typeof json.error === "string" ? json.error : `HTTP ${res.status}`;
     throw new Error(msg);
   }
-  return isRecord(json) ? (json as RetrieveApiResponse) : null;
+  if (!isRecord(json)) throw new Error("Empty/invalid response from /api/chat");
+  return json as ChatGenerateResponse;
 }
 
 function isNonEmptyStringArray(x: unknown): x is string[] {
@@ -235,6 +213,12 @@ function GatekeeperCard({ payload }: { payload: GatekeeperApiResponse }) {
       </div>
 
       <div className="rounded-2xl border border-black/10 bg-white/60 p-4 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
+        <FieldRow k="skip_RAG">
+          <Chip label={meta.skip_RAG ? "true" : "false"} />
+        </FieldRow>
+
+        <div className="border-t border-black/10 dark:border-white/10" />
+
         <FieldRow k="reframed_query">
           {meta.reframed_query ? (
             <span className="break-words">{meta.reframed_query}</span>
@@ -456,6 +440,72 @@ function TopChunksCard({
   );
 }
 
+const SourcesCard = memo(function SourcesCard({
+  sources,
+}: {
+  sources: SourceCitation[];
+}) {
+  if (!sources.length) return null;
+
+  return (
+    <div className="w-full">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+          Sources
+        </div>
+        <div className="shrink-0 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
+          {sources.length} shown
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-black/10 bg-white/60 p-4 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
+        <div className="flex flex-col gap-4">
+          {sources.map((s) => {
+            const title =
+              (typeof s.title === "string" && s.title.trim()
+                ? s.title.trim()
+                : typeof s.source === "string" && s.source.trim()
+                  ? s.source.trim()
+                  : null) ?? `Chunk ${s.id}`;
+            const score =
+              typeof s.score === "number" && Number.isFinite(s.score)
+                ? s.score.toFixed(3)
+                : null;
+            const preview =
+              typeof s.preview === "string" && s.preview.trim() ? s.preview.trim() : null;
+
+            return (
+              <div
+                key={s.id}
+                className="rounded-xl border border-black/10 bg-white/40 p-3 dark:border-white/10 dark:bg-white/5"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                    {title}
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-zinc-600 dark:text-zinc-400">
+                    <span className="font-mono">id {s.id}</span>
+                    {score ? <span className="font-mono">score {score}</span> : null}
+                    {typeof s.source === "string" && s.source.trim() ? (
+                      <span className="truncate">{s.source.trim()}</span>
+                    ) : null}
+                  </div>
+                </div>
+
+                {preview ? (
+                  <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-900 dark:text-zinc-100">
+                    {preview.length > 600 ? `${preview.slice(0, 600)}…` : preview}
+                  </p>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const MessageBubble = memo(function MessageBubble({
   message,
 }: {
@@ -492,6 +542,9 @@ const MessageBubble = memo(function MessageBubble({
         ) : (
           <div className="flex w-full flex-col gap-3">
             <span className="whitespace-pre-wrap">{message.content}</span>
+            {Array.isArray(message.sources) && message.sources.length ? (
+              <SourcesCard sources={message.sources} />
+            ) : null}
             {message.gatekeeperPayload && isRecord(message.gatekeeperPayload) ? (
               <GatekeeperCard payload={message.gatekeeperPayload} />
             ) : null}
@@ -601,44 +654,35 @@ export default function ChatClient() {
     setMessages((prev) => [...prev, userMsg]);
 
     try {
-      const gatekeeperPayload = await callGatekeeper(text);
-      const gatekeeper = gatekeeperPayload?.gatekeeper;
+      const payload = await callChat(text);
+      const sources = normalizeSourceCitations(payload.sources);
 
-      let retrievePayload: RetrieveApiResponse | null = null;
-      let retrieveError: string | null = null;
-
-      if (gatekeeper) {
-        try {
-          retrievePayload = await callRetrieve({ query: text, gatekeeper });
-          if (!retrievePayload) retrieveError = "Empty response from /api/retrieve";
-        } catch (e) {
-          retrieveError =
-            e instanceof Error ? e.message : "Unknown error calling /api/retrieve";
-        }
-      } else {
-        retrieveError = "Gatekeeper returned no metadata (cannot retrieve).";
-      }
-
-      const retrievedCount = retrievePayload?.chunks?.length ?? 0;
-      const assistantText = retrieveError
-        ? "Retrieval failed."
-        : retrievedCount > 0
-          ? `Retrieved ${retrievedCount} chunk${retrievedCount === 1 ? "" : "s"}.`
-          : "No chunks retrieved.";
+      const gatekeeperPayload: GatekeeperApiResponse | null =
+        payload.debug?.gatekeeper && isRecord(payload.debug.gatekeeper)
+          ? {
+              gatekeeper: payload.debug.gatekeeper as unknown as GatekeeperMetadata,
+              rewritten_query: payload.debug.rewritten_query,
+            }
+          : null;
+      const retrievePayload: RetrieveApiResponse | null =
+        payload.debug?.retrieval && isRecord(payload.debug.retrieval)
+          ? (payload.debug.retrieval as unknown as RetrieveApiResponse)
+          : null;
 
       const assistantMsg: ChatMessage = {
-        ...createMessage("assistant", assistantText),
+        ...createMessage("assistant", payload.answer),
+        sources,
         gatekeeperPayload,
         retrievePayload,
-        retrieveError,
+        retrieveError: null,
       };
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (e) {
       const msg =
-        e instanceof Error ? e.message : "Unknown error calling /api/gatekeeper";
+        e instanceof Error ? e.message : "Unknown error calling /api/chat";
       const assistantMsg = createMessage(
         "assistant",
-        `Gatekeeper error:\n${msg}`,
+        `Chat error:\n${msg}`,
       );
       setMessages((prev) => [...prev, assistantMsg]);
     } finally {
@@ -671,7 +715,7 @@ export default function ChatClient() {
     setMessages(() => {
       const message = createMessage(
         "assistant",
-        "Cleared. Send a message to run gatekeeper + retrieval again.",
+        "Cleared. Send a message to run /api/chat again.",
       );
       return [message];
     });
@@ -691,7 +735,7 @@ export default function ChatClient() {
               Retrieval Chat
             </p>
             <p className="text-xs text-zinc-600 dark:text-zinc-400">
-              Calls /api/gatekeeper then /api/retrieve
+              Calls /api/chat (gatekeeper + retrieve + generate)
             </p>
           </div>
         </div>
