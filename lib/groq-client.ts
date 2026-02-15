@@ -46,13 +46,14 @@ function envTimeoutMs(name: string, def: number): number {
 
 export async function groqChatCompletion(
   req: GroqChatCompletionRequest,
-  opts?: { requestId?: string; purpose?: string },
+  opts?: { requestId?: string; purpose?: string; timeoutMs?: number; maxRetries?: number },
 ): Promise<{ content: string; rawText: string }> {
   const apiKey = requiredEnv("GROQ_API_KEY");
   const baseUrl = getBaseUrl();
-  const timeoutMs = envTimeoutMs("GROQ_TIMEOUT_MS", 20_000);
+  const timeoutMs = typeof opts?.timeoutMs === "number" ? Math.trunc(opts.timeoutMs) : envTimeoutMs("GROQ_TIMEOUT_MS", 20_000);
 
-  const maxRetries = Math.max(0, envInt("GROQ_MAX_RETRIES", 2));
+  const maxRetries =
+    typeof opts?.maxRetries === "number" ? Math.max(0, Math.trunc(opts.maxRetries)) : Math.max(0, envInt("GROQ_MAX_RETRIES", 2));
 
   let lastErr: unknown = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {

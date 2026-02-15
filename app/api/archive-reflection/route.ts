@@ -1,9 +1,8 @@
 import { buildTopChunksForPrompt } from "@/lib/chat-prompt";
+import { groqChatCompletion } from "@/lib/groq-client";
 import { runRetrieval } from "@/lib/retrieve";
 import { ArchiveReflectionSchema, sanitizeArchiveReflection } from "@/lib/archive-reflection";
 import { isRateLimitMessage, retryAfterHeadersFromMessage } from "@/lib/rate-limit";
-import { createOpenAI } from "@ai-sdk/openai";
-import { generateText } from "ai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -215,37 +214,41 @@ export async function POST(req: Request) {
     retrieved_chunks: promptChunks,
   };
 
-  // Step 3: Use Vercel AI SDK streaming for structured object generation (compatible with experimental_useObject).
-  const groqOpenAI = createOpenAI({
-    name: "groq",
-    apiKey,
-    baseURL: process.env.GROQ_BASE_URL || "https://api.groq.com/openai/v1",
-  });
-
   try {
-    // Use plain text generation and parse JSON ourselves.
-    // This avoids Groq models that do not support `response_format: { type: "json_schema" }`.
-    const runOnce = async (repairHint?: string) => {
-      const messages = [
+    const runOnce = async (repairHint?: string): Promise<string> => {
+      const baseMessages = [
         { role: "system" as const, content: system },
         { role: "user" as const, content: JSON.stringify(promptPayload) },
       ];
-      if (repairHint) messages.push({ role: "user" as const, content: repairHint });
+      const messages = repairHint
+        ? [...baseMessages, { role: "user" as const, content: repairHint }]
+        : baseMessages;
 
-      return await generateText({
-        // Groq is OpenAI-compatible; treat it as an OpenAI chat model.
-        model: groqOpenAI.chat(modelName as never),
-        temperature: 0,
-        maxOutputTokens: 1300,
-        messages,
-      });
+      // Prefer JSON mode; retry without it if the model/provider rejects response_format.
+      try {
+        const { content } = await groqChatCompletion(
+          { model: modelName, temperature: 0, max_tokens: 1300, messages, response_format: { type: "json_object" } },
+          { purpose: "archive_reflection", requestId: undefined },
+        );
+        return content;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg.toLowerCase().includes("response_format") || msg.toLowerCase().includes("json_object")) {
+          const { content } = await groqChatCompletion(
+            { model: modelName, temperature: 0, max_tokens: 1300, messages },
+            { purpose: "archive_reflection", requestId: undefined },
+          );
+          return content;
+        }
+        throw e;
+      }
     };
 
-    const result = await runOnce();
+    const text = await runOnce();
 
     let parsed: unknown;
     try {
-      parsed = parseModelJson(result.text);
+      parsed = parseModelJson(text);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Invalid JSON";
       // One repair retry: ask the model to re-emit valid JSON only.
@@ -253,11 +256,23 @@ export async function POST(req: Request) {
         "Your previous response was invalid JSON (" +
         msg +
         "). Output ONLY corrected JSON that matches the schema. Use double quotes, no trailing commas.";
-      const repaired = await runOnce(hint);
-      parsed = parseModelJson(repaired.text);
+      const repairedText = await runOnce(hint);
+      parsed = parseModelJson(repairedText);
     }
 
-    const validated = ArchiveReflectionSchema.safeParse(parsed);
+    let validated = ArchiveReflectionSchema.safeParse(parsed);
+    if (!validated.success) {
+      const flat = validated.error.flatten();
+      const missingKeys = Object.keys(flat.fieldErrors || {}).filter(Boolean);
+      const hint =
+        "Your previous JSON did not match the schema (missing/invalid fields: " +
+        (missingKeys.length ? missingKeys.join(", ") : "unknown") +
+        "). Output ONLY corrected JSON with ALL required keys present. For any string field you are unsure about, output an empty string.";
+      const repairedText = await runOnce(hint);
+      parsed = parseModelJson(repairedText);
+      validated = ArchiveReflectionSchema.safeParse(parsed);
+    }
+
     if (!validated.success) {
       console.error("[api/archive-reflection] invalid model JSON:", validated.error.flatten());
       return Response.json({ error: stableErrorMessage("llm") }, { status: 502 });

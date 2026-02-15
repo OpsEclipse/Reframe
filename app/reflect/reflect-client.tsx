@@ -56,6 +56,15 @@ export default function ReflectClient() {
     setIsLoading(true);
     setError(null);
 
+    // Avoid hanging forever if the server/proxy never responds.
+    // Keep this slightly above server-side LLM timeouts so we show a clear UI error.
+    const timeoutMs = 30_000;
+    let didTimeout = false;
+    const timeoutId = window.setTimeout(() => {
+      didTimeout = true;
+      abort.abort();
+    }, timeoutMs);
+
     try {
       const res = await fetch("/api/archive-reflection", {
         method: "POST",
@@ -83,9 +92,13 @@ export default function ReflectClient() {
       setReflection(parsed.data);
       setRunId((x) => x + 1);
     } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") return;
+      if (e instanceof DOMException && e.name === "AbortError") {
+        if (didTimeout) setError("Reflection generation timed out.");
+        return;
+      }
       setError("Reflection generation failed.");
     } finally {
+      clearTimeout(timeoutId);
       setIsLoading(false);
     }
   }, []);

@@ -1,3 +1,5 @@
+import { parseModelJsonObject } from "@/lib/model-json";
+
 export type SourceCitation = {
   id: string;
   title?: string | null;
@@ -64,67 +66,8 @@ export function clampTopK(x: unknown, def: number): number {
   return v;
 }
 
-function extractLastJsonObject(text: string): string {
-  // Extract the last {...} JSON object in `text` while respecting strings/escapes.
-  // This is a safety net only; callers should prefer strict JSON-only completions.
-  let inString = false;
-  let escape = false;
-  let depth = 0;
-  let end = -1;
-  let start = -1;
-
-  for (let i = text.length - 1; i >= 0; i--) {
-    const ch = text[i];
-    if (inString) {
-      if (escape) {
-        escape = false;
-        continue;
-      }
-      if (ch === "\\\\") {
-        escape = true;
-        continue;
-      }
-      if (ch === "\"") inString = false;
-      continue;
-    }
-
-    if (ch === "\"") {
-      inString = true;
-      escape = false;
-      continue;
-    }
-
-    if (ch === "}") {
-      if (end === -1) end = i;
-      depth++;
-      continue;
-    }
-    if (ch === "{") {
-      depth--;
-      if (depth === 0 && end !== -1) {
-        start = i;
-        break;
-      }
-      continue;
-    }
-  }
-
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("No JSON object found in model output");
-  }
-  return text.slice(start, end + 1);
-}
-
 export function parseChatGenerateModelOutput(rawText: string): { answer: string; sources: SourceCitation[] } {
-  const parse = (t: string): unknown => JSON.parse(t);
-
-  let parsed: unknown;
-  try {
-    parsed = parse(rawText);
-  } catch {
-    const last = extractLastJsonObject(rawText);
-    parsed = parse(last);
-  }
+  const parsed = parseModelJsonObject(rawText);
 
   if (!isRecord(parsed)) throw new Error("Model output JSON must be an object");
   const answer = safeString(parsed.answer) ?? "";
