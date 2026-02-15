@@ -38,6 +38,9 @@ Env vars (see `.env.example`):
 - `OPENAI_API_KEY` (required if `embed` is true)
 - `OPENAI_EMBEDDING_MODEL` (optional, defaults to `text-embedding-3-small`)
 - `OPENAI_BASE_URL` (optional, defaults to `https://api.openai.com/v1`)
+- `PINECONE_API_KEY` (required for retrieval)
+- `PINECONE_INDEX_HOST` (required for retrieval)
+- `PINECONE_NAMESPACE` (optional)
 
 ## Learn More
 

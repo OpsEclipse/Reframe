@@ -8,6 +8,7 @@ import {
   useState,
   type ChangeEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 
 type Role = "user" | "assistant";
@@ -17,6 +18,9 @@ type ChatMessage = {
   role: Role;
   content: string;
   createdAt: number;
+  gatekeeperPayload?: GatekeeperApiResponse | null;
+  retrievePayload?: RetrieveApiResponse | null;
+  retrieveError?: string | null;
 };
 
 type GatekeeperMetadata = {
@@ -34,6 +38,36 @@ type GatekeeperApiResponse = {
   error?: string;
 };
 
+type RetrieveStats = {
+  top_k: number;
+  blend_ratio: number;
+  base_top_k: number;
+  matched_top_k: number;
+  base_count: number;
+  matched_count: number;
+  union_count: number;
+};
+
+type RankedChunk = {
+  id: string;
+  pineconeScore: number;
+  metadata?: Record<string, unknown>;
+  match_reasons: { emotions: string[]; people: string[]; keywords: string[] };
+  precedence: {
+    avgCoverage: number;
+    facetMatchedCount: number;
+    totalHits: number;
+    pineconeScore: number;
+  };
+};
+
+type RetrieveApiResponse = {
+  rewritten_query?: string;
+  stats?: RetrieveStats;
+  chunks?: RankedChunk[];
+  error?: string;
+};
+
 function isRecord(x: unknown): x is Record<string, unknown> {
   return !!x && typeof x === "object" && !Array.isArray(x);
 }
@@ -47,9 +81,9 @@ const INPUT_HINTS = [
   "Find code references",
 ];
 const EMPTY_MESSAGE_FOOTER =
-  "Currently: calls /api/gatekeeper and shows extracted metadata. Upcoming: retrieval + citations.";
+  "Currently: calls /api/gatekeeper then /api/retrieve and shows Top Chunks under the assistant response.";
 const initialAssistantMessage =
-  "Ask a question. For now this calls `/api/gatekeeper` and returns the Gatekeeper JSON (plus an embedding computed server-side).";
+  "Ask a question. This calls `/api/gatekeeper` then `/api/retrieve`, and shows Top Chunks under the assistant response.";
 
 // Keep initial render deterministic to avoid hydration mismatches.
 const WELCOME_MESSAGES: ChatMessage[] = [
@@ -95,7 +129,8 @@ async function callGatekeeper(query: string): Promise<GatekeeperApiResponse | nu
     body: JSON.stringify({
       query,
       timezone,
-      embed: true,
+      // Retrieval will embed (once). Avoid duplicating embeddings by disabling it here.
+      embed: false,
       include_embedding_vector: false,
     }),
   });
@@ -108,27 +143,317 @@ async function callGatekeeper(query: string): Promise<GatekeeperApiResponse | nu
   return isRecord(json) ? (json as GatekeeperApiResponse) : null;
 }
 
-function formatGatekeeperAssistantText(payload: GatekeeperApiResponse | null) {
-  const gatekeeper = payload?.gatekeeper ?? payload ?? null;
-  const rewritten = typeof payload?.rewritten_query === "string" ? payload.rewritten_query : null;
-  const embeddingModel =
-    typeof payload?.embedding?.model === "string" ? payload.embedding.model : null;
-  const embeddingDims =
-    typeof payload?.embedding?.dims === "number" ? payload.embedding.dims : null;
+async function callRetrieve(opts: {
+  query: string;
+  gatekeeper: GatekeeperMetadata;
+}): Promise<RetrieveApiResponse | null> {
+  const res = await fetch("/api/retrieve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query: opts.query,
+      gatekeeper: opts.gatekeeper,
+    }),
+  });
 
-  const parts: string[] = [];
-  parts.push("Gatekeeper JSON:");
-  parts.push(JSON.stringify(gatekeeper, null, 2));
-  if (rewritten) {
-    parts.push("");
-    parts.push("Rewritten query:");
-    parts.push(rewritten);
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const msg =
+      isRecord(json) && typeof json.error === "string" ? json.error : `HTTP ${res.status}`;
+    throw new Error(msg);
   }
-  if (embeddingModel && embeddingDims) {
-    parts.push("");
-    parts.push(`Embedding: model=${embeddingModel}, dims=${embeddingDims}`);
+  return isRecord(json) ? (json as RetrieveApiResponse) : null;
+}
+
+function isNonEmptyStringArray(x: unknown): x is string[] {
+  return Array.isArray(x) && x.length > 0 && x.every((v) => typeof v === "string");
+}
+
+function NullChip() {
+  return (
+    <span className="inline-flex items-center rounded-full border border-black/10 bg-white/30 px-2.5 py-1 text-[11px] font-semibold text-zinc-500 backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-zinc-400">
+      null
+    </span>
+  );
+}
+
+function Chip({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-black/10 bg-white/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-900 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-zinc-100">
+      {label}
+    </span>
+  );
+}
+
+function FieldRow({
+  k,
+  children,
+}: {
+  k: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-[140px_1fr] gap-3 py-2">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-400">
+        {k}
+      </div>
+      <div className="min-w-0 text-sm text-zinc-950 dark:text-zinc-50">{children}</div>
+    </div>
+  );
+}
+
+function GatekeeperCard({ payload }: { payload: GatekeeperApiResponse }) {
+  const meta = payload.gatekeeper;
+  const rewritten =
+    typeof payload.rewritten_query === "string" && payload.rewritten_query.trim()
+      ? payload.rewritten_query.trim()
+      : null;
+  const embeddingModel =
+    typeof payload.embedding?.model === "string" ? payload.embedding.model : null;
+  const embeddingDims =
+    typeof payload.embedding?.dims === "number" ? payload.embedding.dims : null;
+
+  if (!meta) {
+    return (
+      <div className="text-sm text-zinc-800 dark:text-zinc-200">
+        Gatekeeper returned no metadata.
+      </div>
+    );
   }
-  return parts.join("\n");
+
+  return (
+    <div className="w-full">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+          Gatekeeper Metadata
+        </div>
+        {embeddingModel && embeddingDims ? (
+          <div className="shrink-0 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
+            Embedding: {embeddingModel}, dims {embeddingDims}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="rounded-2xl border border-black/10 bg-white/60 p-4 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
+        <FieldRow k="reframed_query">
+          {meta.reframed_query ? (
+            <span className="break-words">{meta.reframed_query}</span>
+          ) : (
+            <NullChip />
+          )}
+        </FieldRow>
+
+        <div className="border-t border-black/10 dark:border-white/10" />
+
+        <FieldRow k="emotions">
+          {isNonEmptyStringArray(meta.emotions) ? (
+            <div className="flex flex-wrap gap-2">
+              {meta.emotions.map((e) => (
+                <Chip key={e} label={e} />
+              ))}
+            </div>
+          ) : (
+            <NullChip />
+          )}
+        </FieldRow>
+
+        <div className="border-t border-black/10 dark:border-white/10" />
+
+        <FieldRow k="people">
+          {isNonEmptyStringArray(meta.people) ? (
+            <div className="flex flex-wrap gap-2">
+              {meta.people.map((p) => (
+                <Chip key={p} label={p} />
+              ))}
+            </div>
+          ) : (
+            <NullChip />
+          )}
+        </FieldRow>
+
+        <div className="border-t border-black/10 dark:border-white/10" />
+
+        <FieldRow k="keywords">
+          {isNonEmptyStringArray(meta.keywords) ? (
+            <div className="flex flex-wrap gap-2">
+              {meta.keywords.map((kw) => (
+                <Chip key={kw} label={kw} />
+              ))}
+            </div>
+          ) : (
+            <NullChip />
+          )}
+        </FieldRow>
+
+        <div className="border-t border-black/10 dark:border-white/10" />
+
+        <FieldRow k="date_int">
+          {typeof meta.date_int === "number" ? (
+            <span className="font-mono text-sm">{meta.date_int}</span>
+          ) : (
+            <NullChip />
+          )}
+        </FieldRow>
+
+        {rewritten ? (
+          <>
+            <div className="border-t border-black/10 dark:border-white/10" />
+            <FieldRow k="rewritten_query">
+              <span className="break-words">{rewritten}</span>
+            </FieldRow>
+          </>
+        ) : null}
+      </div>
+
+      <details className="mt-3 rounded-2xl border border-black/10 bg-white/40 px-4 py-3 text-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
+        <summary className="cursor-pointer select-none text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+          Raw JSON
+        </summary>
+        <pre className="mt-3 overflow-x-auto rounded-xl bg-black/5 p-3 text-[12px] leading-5 text-zinc-900 dark:bg-white/5 dark:text-zinc-100">
+          {JSON.stringify(meta, null, 2)}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
+function pickFirstString(meta: Record<string, unknown> | undefined, keys: string[]): string | null {
+  if (!meta) return null;
+  for (const k of keys) {
+    const v = meta[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+function TopChunksCard({
+  payload,
+  error,
+}: {
+  payload?: RetrieveApiResponse | null;
+  error?: string | null;
+}) {
+  if (error) {
+    return (
+      <div className="w-full">
+        <div className="mb-3 text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+          Top Chunks
+        </div>
+        <div className="rounded-2xl border border-black/10 bg-white/60 p-4 text-sm text-zinc-800 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-zinc-200">
+          Retrieve error: {error}
+        </div>
+      </div>
+    );
+  }
+
+  const chunks = Array.isArray(payload?.chunks) ? payload!.chunks! : [];
+  const stats = payload?.stats;
+
+  return (
+    <div className="w-full">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+          Top Chunks
+        </div>
+        {stats ? (
+          <div className="shrink-0 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
+            {stats.union_count} union, {chunks.length} shown
+          </div>
+        ) : null}
+      </div>
+
+      <div className="rounded-2xl border border-black/10 bg-white/60 p-4 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
+        {chunks.length ? (
+          <div className="flex flex-col gap-4">
+            {chunks.map((c, idx) => {
+              const meta = c.metadata;
+              const title =
+                pickFirstString(meta, ["title", "source", "file", "path", "url"]) ??
+                `Chunk ${idx + 1}`;
+              const preview = pickFirstString(meta, [
+                "text",
+                "content",
+                "chunk",
+                "excerpt",
+                "body",
+              ]);
+
+              const reasons = c.match_reasons ?? { emotions: [], people: [], keywords: [] };
+              const hasReasons =
+                reasons.emotions.length || reasons.people.length || reasons.keywords.length;
+
+              return (
+                <div
+                  key={c.id}
+                  className="rounded-xl border border-black/10 bg-white/40 p-3 dark:border-white/10 dark:bg-white/5"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                        {title}
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-zinc-600 dark:text-zinc-400">
+                        <span className="font-mono">id {c.id}</span>
+                        <span className="font-mono">
+                          score{" "}
+                          {Number.isFinite(c.pineconeScore) ? c.pineconeScore.toFixed(3) : "0.000"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {preview ? (
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-900 dark:text-zinc-100">
+                      {preview.length > 600 ? `${preview.slice(0, 600)}…` : preview}
+                    </p>
+                  ) : meta ? (
+                    <pre className="mt-2 overflow-x-auto rounded-lg bg-black/5 p-2 text-[11px] leading-5 text-zinc-900 dark:bg-white/5 dark:text-zinc-100">
+                      {JSON.stringify(meta, null, 2)}
+                    </pre>
+                  ) : null}
+
+                  <div className="mt-2">
+                    {hasReasons ? (
+                      <div className="flex flex-wrap gap-2">
+                        {reasons.emotions.map((e) => (
+                          <Chip key={`e:${c.id}:${e}`} label={`emotion:${e}`} />
+                        ))}
+                        {reasons.people.map((p) => (
+                          <Chip key={`p:${c.id}:${p}`} label={`person:${p}`} />
+                        ))}
+                        {reasons.keywords.map((k) => (
+                          <Chip key={`k:${c.id}:${k}`} label={`keyword:${k}`} />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-zinc-600 dark:text-zinc-400">
+                        No facet matches (semantic-only).
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-sm text-zinc-800 dark:text-zinc-200">
+            No chunks returned.
+          </div>
+        )}
+      </div>
+
+      {payload ? (
+        <details className="mt-3 rounded-2xl border border-black/10 bg-white/40 px-4 py-3 text-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
+          <summary className="cursor-pointer select-none text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+            Raw JSON
+          </summary>
+          <pre className="mt-3 overflow-x-auto rounded-xl bg-black/5 p-3 text-[12px] leading-5 text-zinc-900 dark:bg-white/5 dark:text-zinc-100">
+            {JSON.stringify(payload, null, 2)}
+          </pre>
+        </details>
+      ) : null}
+    </div>
+  );
 }
 
 const MessageBubble = memo(function MessageBubble({
@@ -150,7 +475,7 @@ const MessageBubble = memo(function MessageBubble({
         </div>
       ) : null}
       <div
-        className={`group relative max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${
+        className={`group relative max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${
           isUser
             ? "bg-[linear-gradient(180deg,#141414,#090909)] text-zinc-50 shadow-[0_18px_40px_-26px_rgba(0,0,0,0.85)]"
             : "border border-black/10 bg-white/70 text-zinc-950 backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-zinc-50"
@@ -161,7 +486,20 @@ const MessageBubble = memo(function MessageBubble({
             {timeText}
           </div>
         ) : null}
-        {message.content}
+
+        {isUser ? (
+          <span className="whitespace-pre-wrap">{message.content}</span>
+        ) : (
+          <div className="flex w-full flex-col gap-3">
+            <span className="whitespace-pre-wrap">{message.content}</span>
+            {message.gatekeeperPayload && isRecord(message.gatekeeperPayload) ? (
+              <GatekeeperCard payload={message.gatekeeperPayload} />
+            ) : null}
+            {message.retrievePayload || message.retrieveError ? (
+              <TopChunksCard payload={message.retrievePayload} error={message.retrieveError} />
+            ) : null}
+          </div>
+        )}
       </div>
       {isUser ? (
         <div className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/60 text-[11px] font-semibold text-zinc-900 shadow-sm backdrop-blur sm:flex dark:border-white/10 dark:bg-white/5 dark:text-zinc-100">
@@ -178,7 +516,7 @@ const EmptyState = memo(function EmptyState() {
       <div className="relative">
         <div className="absolute -inset-10 rounded-full bg-[conic-gradient(from_220deg,rgba(0,110,255,0.22),rgba(255,135,0,0.18),rgba(0,110,255,0.22))] blur-2xl" />
         <div className="relative rounded-2xl border border-black/10 bg-white/70 px-5 py-4 text-sm text-zinc-900 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-zinc-100">
-          Ask anything. Soon this will retrieve context and answer with sources.
+          Ask anything. This will retrieve Top Chunks and show them under the assistant response.
         </div>
       </div>
       <div className="flex flex-wrap justify-center gap-2 pt-2 text-xs text-zinc-600 dark:text-zinc-400">
@@ -263,8 +601,30 @@ export default function ChatClient() {
     setMessages((prev) => [...prev, userMsg]);
 
     try {
-      const payload = await callGatekeeper(text);
-      const assistantMsg = createMessage("assistant", formatGatekeeperAssistantText(payload));
+      const gatekeeperPayload = await callGatekeeper(text);
+      const gatekeeper = gatekeeperPayload?.gatekeeper;
+
+      let retrievePayload: RetrieveApiResponse | null = null;
+      let retrieveError: string | null = null;
+
+      if (gatekeeper) {
+        try {
+          retrievePayload = await callRetrieve({ query: text, gatekeeper });
+          if (!retrievePayload) retrieveError = "Empty response from /api/retrieve";
+        } catch (e) {
+          retrieveError =
+            e instanceof Error ? e.message : "Unknown error calling /api/retrieve";
+        }
+      } else {
+        retrieveError = "Gatekeeper returned no metadata (cannot retrieve).";
+      }
+
+      const assistantMsg: ChatMessage = {
+        ...createMessage("assistant", "Retrieved top chunks."),
+        gatekeeperPayload,
+        retrievePayload,
+        retrieveError,
+      };
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (e) {
       const msg =
@@ -304,7 +664,7 @@ export default function ChatClient() {
     setMessages(() => {
       const message = createMessage(
         "assistant",
-        "Cleared. Next step is wiring retrieval; for now each message returns Gatekeeper JSON + embedding dims.",
+        "Cleared. Send a message to run gatekeeper + retrieval again.",
       );
       return [message];
     });
@@ -324,7 +684,7 @@ export default function ChatClient() {
               Retrieval Chat
             </p>
             <p className="text-xs text-zinc-600 dark:text-zinc-400">
-              Calls /api/gatekeeper
+              Calls /api/gatekeeper then /api/retrieve
             </p>
           </div>
         </div>
