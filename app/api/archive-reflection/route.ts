@@ -1,8 +1,10 @@
 import { buildTopChunksForPrompt } from "@/lib/chat-prompt";
 import { groqChatCompletion } from "@/lib/groq-client";
+import { openaiChatCompletion } from "@/lib/openai-client";
 import { runRetrieval } from "@/lib/retrieve";
 import { ArchiveReflectionSchema, sanitizeArchiveReflection } from "@/lib/archive-reflection";
 import { isRateLimitMessage, retryAfterHeadersFromMessage } from "@/lib/rate-limit";
+import { parseModelJsonObject } from "@/lib/model-json";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,7 +33,8 @@ function pickRandom<T>(arr: readonly T[]): T {
 function buildArchiveReflectionSystemPrompt(validChunkIds: string[]): string {
   return [
     "You are generating a short reflection block with a timeline of evidence from the user's archive.",
-    "Return only JSON that matches the provided schema (no markdown, no prose outside JSON).",
+    "Return ONLY a single JSON object that matches the provided schema (no markdown, no prose outside JSON).",
+    "All keys are required. Never omit keys. If unsure, use empty strings, empty arrays, or null (only where allowed).",
     "",
     "JSON schema (shape + types):",
     "{",
@@ -44,6 +47,19 @@ function buildArchiveReflectionSystemPrompt(validChunkIds: string[]): string {
     '  "pattern": string[],',
     '  "question": string,',
     '  "sources": Array<{ "id": string, "title": string|null, "source": string|null, "score": number|null, "preview": string|null }>',
+    "}",
+    "",
+    "Template (copy this shape exactly; fill in values):",
+    "{",
+    '  "greeting": "greeting_name,",',
+    '  "anchor_line": { "before": "", "highlight": "", "after": "." },',
+    '  "lines": [],',
+    '  "transition": "",',
+    '  "timeline": [],',
+    '  "conclusion": "",',
+    '  "pattern": [],',
+    '  "question": "",',
+    '  "sources": []',
     "}",
     "",
     "Voice & POV:",
@@ -77,71 +93,6 @@ function buildArchiveReflectionSystemPrompt(validChunkIds: string[]): string {
   ].join("\n");
 }
 
-function stripCodeFences(text: string): string {
-  // Some models occasionally wrap JSON in ```json fences despite instructions.
-  return text.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
-}
-
-function extractLastJsonObject(text: string): string {
-  // Extract the last {...} JSON object in `text` while respecting strings/escapes.
-  let inString = false;
-  let escape = false;
-  let depth = 0;
-  let end = -1;
-  let start = -1;
-
-  for (let i = text.length - 1; i >= 0; i--) {
-    const ch = text[i];
-    if (inString) {
-      if (escape) {
-        escape = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escape = true;
-        continue;
-      }
-      if (ch === "\"") inString = false;
-      continue;
-    }
-
-    if (ch === "\"") {
-      inString = true;
-      escape = false;
-      continue;
-    }
-
-    if (ch === "}") {
-      if (end === -1) end = i;
-      depth++;
-      continue;
-    }
-    if (ch === "{") {
-      depth--;
-      if (depth === 0 && end !== -1) {
-        start = i;
-        break;
-      }
-      continue;
-    }
-  }
-
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("No JSON object found in model output");
-  }
-  return text.slice(start, end + 1);
-}
-
-function parseModelJson(text: string): unknown {
-  const cleaned = stripCodeFences(text).trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    const lastObj = extractLastJsonObject(cleaned);
-    return JSON.parse(lastObj);
-  }
-}
-
 export async function POST(req: Request) {
   let body: RequestBody | null = null;
   try {
@@ -151,17 +102,27 @@ export async function POST(req: Request) {
     body = {};
   }
 
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
+  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+  const hasGroq = !!process.env.GROQ_API_KEY;
+  if (!hasOpenAI && !hasGroq) {
     return Response.json({ error: stableErrorMessage("misconfigured") }, { status: 500 });
   }
 
-  // This endpoint always routes to Groq (OpenAI-compatible). Prefer Groq-scoped model env vars.
-  const modelName =
+  const providerPrefRaw = (process.env.ARCHIVE_REFLECTION_PROVIDER || process.env.MAIN_LLM_PROVIDER || "")
+    .trim()
+    .toLowerCase();
+  const providerPref: "auto" | "openai" | "groq" =
+    providerPrefRaw === "openai" || providerPrefRaw === "groq" ? providerPrefRaw : "auto";
+
+  const openaiModel =
+    (process.env.ARCHIVE_REFLECTION_OPENAI_MODEL || "").trim() ||
+    (process.env.MAIN_LLM_MODEL || "").trim() ||
+    "gpt-4o-mini";
+  const groqModel =
+    (process.env.ARCHIVE_REFLECTION_GROQ_MODEL || "").trim() ||
     (process.env.ARCHIVE_REFLECTION_MODEL || "").trim() ||
     (process.env.MAIN_LLM_FALLBACK_MODEL || "").trim() ||
     (process.env.GROQ_MODEL || "").trim() ||
-    (process.env.MAIN_LLM_MODEL || "").trim() ||
     "llama-3.3-70b-versatile";
 
   const seedPrompts = [
@@ -224,54 +185,103 @@ export async function POST(req: Request) {
         ? [...baseMessages, { role: "user" as const, content: repairHint }]
         : baseMessages;
 
+      const timeoutMs = 25_000;
+      const maxTokens = 1300;
+
       // Prefer JSON mode; retry without it if the model/provider rejects response_format.
-      try {
-        const { content } = await groqChatCompletion(
-          { model: modelName, temperature: 0, max_tokens: 1300, messages, response_format: { type: "json_object" } },
-          { purpose: "archive_reflection", requestId: undefined },
-        );
-        return content;
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "";
-        if (msg.toLowerCase().includes("response_format") || msg.toLowerCase().includes("json_object")) {
-          const { content } = await groqChatCompletion(
-            { model: modelName, temperature: 0, max_tokens: 1300, messages },
-            { purpose: "archive_reflection", requestId: undefined },
+      let lastErr: unknown = null;
+
+      const tryOpenAI = async (): Promise<string> => {
+        try {
+          const { content } = await openaiChatCompletion(
+            { model: openaiModel, temperature: 0, max_tokens: maxTokens, messages, response_format: { type: "json_object" } },
+            { purpose: "archive_reflection", requestId: undefined, timeoutMs, maxRetries: 0 },
           );
           return content;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "";
+          if (msg.toLowerCase().includes("response_format") || msg.toLowerCase().includes("json_object")) {
+            const { content } = await openaiChatCompletion(
+              { model: openaiModel, temperature: 0, max_tokens: maxTokens, messages },
+              { purpose: "archive_reflection", requestId: undefined, timeoutMs, maxRetries: 0 },
+            );
+            return content;
+          }
+          throw e;
         }
-        throw e;
+      };
+
+      const tryGroq = async (): Promise<string> => {
+        try {
+          const { content } = await groqChatCompletion(
+            { model: groqModel, temperature: 0, max_tokens: maxTokens, messages, response_format: { type: "json_object" } },
+            { purpose: "archive_reflection", requestId: undefined, timeoutMs, maxRetries: 0 },
+          );
+          return content;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "";
+          if (msg.toLowerCase().includes("response_format") || msg.toLowerCase().includes("json_object")) {
+            const { content } = await groqChatCompletion(
+              { model: groqModel, temperature: 0, max_tokens: maxTokens, messages },
+              { purpose: "archive_reflection", requestId: undefined, timeoutMs, maxRetries: 0 },
+            );
+            return content;
+          }
+          throw e;
+        }
+      };
+
+      if (hasOpenAI && providerPref !== "groq") {
+        try {
+          return await tryOpenAI();
+        } catch (e) {
+          lastErr = e;
+        }
       }
+
+      if (hasGroq && providerPref !== "openai") {
+        try {
+          return await tryGroq();
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+
+      throw lastErr instanceof Error ? lastErr : new Error("LLM generation failed");
     };
 
     const text = await runOnce();
 
-    let parsed: unknown;
-    try {
-      parsed = parseModelJson(text);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Invalid JSON";
-      // One repair retry: ask the model to re-emit valid JSON only.
-      const hint =
-        "Your previous response was invalid JSON (" +
-        msg +
-        "). Output ONLY corrected JSON that matches the schema. Use double quotes, no trailing commas.";
-      const repairedText = await runOnce(hint);
-      parsed = parseModelJson(repairedText);
-    }
+	    let parsed: unknown;
+	    try {
+	      parsed = parseModelJsonObject(text);
+	    } catch (e) {
+	      const msg = e instanceof Error ? e.message : "Invalid JSON";
+	      // One repair retry: ask the model to re-emit valid JSON only.
+	      const hint =
+	        "Your previous response was invalid JSON (" +
+	        msg +
+	        "). Output ONLY corrected JSON that matches the schema. Use double quotes, no trailing commas.";
+	      const repairedText = await runOnce(hint);
+	      parsed = parseModelJsonObject(repairedText);
+	    }
 
-    let validated = ArchiveReflectionSchema.safeParse(parsed);
-    if (!validated.success) {
-      const flat = validated.error.flatten();
-      const missingKeys = Object.keys(flat.fieldErrors || {}).filter(Boolean);
-      const hint =
-        "Your previous JSON did not match the schema (missing/invalid fields: " +
-        (missingKeys.length ? missingKeys.join(", ") : "unknown") +
-        "). Output ONLY corrected JSON with ALL required keys present. For any string field you are unsure about, output an empty string.";
-      const repairedText = await runOnce(hint);
-      parsed = parseModelJson(repairedText);
-      validated = ArchiveReflectionSchema.safeParse(parsed);
-    }
+	    let validated = ArchiveReflectionSchema.safeParse(parsed);
+	    if (!validated.success) {
+	      const flat = validated.error.flatten();
+	      const missingKeys = Object.keys(flat.fieldErrors || {}).filter(Boolean);
+	      const hint = [
+	        "Your previous JSON did not match the schema (missing/invalid fields: " +
+	          (missingKeys.length ? missingKeys.join(", ") : "unknown") +
+	          ").",
+	        "Output ONLY corrected JSON with ALL required keys present (copy the template from the system prompt).",
+	        "For any string field you are unsure about, output an empty string. For arrays, output [].",
+	        "Validation errors (for reference): " + JSON.stringify(flat),
+	      ].join("\n");
+	      const repairedText = await runOnce(hint);
+	      parsed = parseModelJsonObject(repairedText);
+	      validated = ArchiveReflectionSchema.safeParse(parsed);
+	    }
 
     if (!validated.success) {
       console.error("[api/archive-reflection] invalid model JSON:", validated.error.flatten());

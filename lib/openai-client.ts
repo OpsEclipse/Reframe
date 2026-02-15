@@ -45,11 +45,11 @@ function envTimeoutMs(name: string, def: number): number {
 
 export async function openaiChatCompletion(
   req: OpenAIChatCompletionRequest,
-  opts?: { maxRetries?: number; requestId?: string; purpose?: string },
+  opts?: { maxRetries?: number; requestId?: string; purpose?: string; timeoutMs?: number },
 ): Promise<{ content: string; rawText: string }> {
   const apiKey = requiredEnv("OPENAI_API_KEY");
   const baseUrl = getBaseUrl();
-  const timeoutMs = envTimeoutMs("OPENAI_TIMEOUT_MS", 20_000);
+  const timeoutMs = typeof opts?.timeoutMs === "number" ? Math.trunc(opts.timeoutMs) : envTimeoutMs("OPENAI_TIMEOUT_MS", 20_000);
 
   const maxRetries = Math.max(0, typeof opts?.maxRetries === "number" ? Math.trunc(opts.maxRetries) : envInt("OPENAI_MAX_RETRIES", 2));
 
