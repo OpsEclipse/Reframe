@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import AppPanel from "../components/app-panel";
 import ChatClient from "./chat-client";
 
 const pageBackgroundClasses =
   "min-h-full bg-[radial-gradient(1000px_520px_at_10%_0%,rgba(0,110,255,0.14),transparent_60%),radial-gradient(900px_540px_at_95%_18%,rgba(255,135,0,0.16),transparent_58%),radial-gradient(700px_420px_at_50%_100%,rgba(0,0,0,0.08),transparent_55%),linear-gradient(to_bottom,#fcfbf7,#f4f4f5)] dark:bg-[radial-gradient(1000px_520px_at_10%_0%,rgba(0,110,255,0.18),transparent_60%),radial-gradient(900px_540px_at_95%_18%,rgba(255,135,0,0.16),transparent_58%),radial-gradient(700px_420px_at_50%_100%,rgba(255,255,255,0.08),transparent_55%),linear-gradient(to_bottom,#050505,#0b0b0c)]";
-const shellPanelClasses =
-  "relative flex-1 overflow-hidden rounded-[28px] border border-black/10 bg-white/55 shadow-[0_18px_42px_-22px_rgba(0,0,0,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:shadow-[0_18px_42px_-22px_rgba(0,0,0,0.85)]";
 
 export const metadata: Metadata = {
   title: "Chat",
@@ -14,7 +13,7 @@ export const metadata: Metadata = {
 
 export default function ChatPage() {
   return (
-    <div className={pageBackgroundClasses}>
+    <div className={`${pageBackgroundClasses} dark`}>
       <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-4 py-10 sm:px-6">
         <header className="mb-6 flex items-center justify-between">
           <div className="flex items-baseline gap-3">
@@ -40,13 +39,13 @@ export default function ChatPage() {
           </Link>
         </header>
 
-        <div className={shellPanelClasses}>
+        <AppPanel className="relative flex-1 overflow-hidden border-2 border-black/50">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_420px_at_20%_10%,rgba(0,110,255,0.10),transparent_62%),radial-gradient(780px_460px_at_86%_18%,rgba(255,135,0,0.10),transparent_60%)] opacity-80" />
           <div className="pointer-events-none absolute inset-0 opacity-25 [background-image:repeating-linear-gradient(115deg,rgba(0,0,0,0.05)_0,rgba(0,0,0,0.05)_1px,transparent_1px,transparent_14px)] dark:opacity-20 dark:[background-image:repeating-linear-gradient(115deg,rgba(255,255,255,0.06)_0,rgba(255,255,255,0.06)_1px,transparent_1px,transparent_14px)]" />
           <div className="relative flex h-full flex-col">
             <ChatClient />
           </div>
-        </div>
+        </AppPanel>
 
         <footer className="mt-6 flex items-center justify-between text-xs text-zinc-600 dark:text-zinc-400">
           <p>

@@ -1,159 +1,58 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --crt-room: radial-gradient(
-      1200px 700px at 20% 5%,
-      rgba(0, 110, 255, 0.12),
-      transparent 55%
-    ),
-    radial-gradient(
-      1200px 700px at 80% 10%,
-      rgba(255, 135, 0, 0.12),
-      transparent 55%
-    ),
-    linear-gradient(to bottom, #0f0f12, #050506);
+  /* Color palette */
+  --ch26-shell-from: #ede9e5;
+  --ch26-shell-to: #dad3cd;
+  --ch26-panel-from: #1e1e1e;
+  --ch26-panel-to-intro: #020202;
+  --ch26-panel-to-final: rgba(30, 30, 30, 0.8);
+  --ch26-panel-border: rgba(0, 0, 0, 0.5);
+
+  /* App semantics */
+  --background: var(--ch26-shell-from);
+  --foreground: #111827;
+  --muted: #4b5563;
+  --surface: rgba(255, 255, 255, 0.55);
+  --surface-elevated: rgba(255, 255, 255, 0.7);
+  --border: rgba(0, 0, 0, 0.12);
+  --accent: #3b82f6;
+  --accent-strong: #60a5fa;
+
+  /* Fonts */
+  --font-sans: var(--font-manrope);
+  --font-mono: var(--font-plex-mono);
+  --font-display: var(--font-fraunces);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-instrument-sans);
-  --font-mono: var(--font-plex-mono);
-  --font-display: var(--font-fraunces);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-display: var(--font-display);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    --crt-room: radial-gradient(
-        1200px 700px at 20% 5%,
-        rgba(0, 110, 255, 0.18),
-        transparent 55%
-      ),
-      radial-gradient(
-        1200px 700px at 80% 10%,
-        rgba(255, 135, 0, 0.18),
-        transparent 55%
-      ),
-      linear-gradient(to bottom, #070708, #020203);
-  }
-}
-
-html,
-body {
-  height: 100%;
-}
-
-body {
-  /* "Room" background behind the CRT frame. Screen content controls its own background. */
-  background: var(--crt-room);
-  color: var(--foreground);
-  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
-  overflow: hidden;
-}
-
-::selection {
-  background: rgba(255, 135, 0, 0.28);
-}
-
-/* CRT frame + warp */
-.crt-shell {
-  height: 100dvh;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: clamp(14px, 2.6vw, 34px);
-}
-
-.crt-bezel {
-  width: min(1120px, 100%);
-  height: 100%;
-  max-height: 980px;
-  padding: clamp(14px, 2.1vw, 22px);
-  border-radius: clamp(22px, 2.6vw, 34px);
-  position: relative;
-  perspective: 1100px;
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.10), rgba(0, 0, 0, 0.74));
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow:
-    0 28px 80px -46px rgba(0, 0, 0, 0.75),
-    0 14px 34px -22px rgba(0, 0, 0, 0.65),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    inset 0 -20px 60px rgba(0, 0, 0, 0.45);
-}
-
-.crt-bezel::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.18),
-    rgba(255, 255, 255, 0.02) 32%,
-    rgba(0, 0, 0, 0.28)
-  );
-  mix-blend-mode: overlay;
-  opacity: 0.55;
-}
-
-.crt-screen {
-  height: 100%;
-  width: 100%;
-  position: relative;
-  overflow: hidden;
-  isolation: isolate;
-  background: #050506;
-  /* Barrel warp approximation via elliptical radii (subtle). */
-  border-radius: 20% / 6%;
-  transform: rotateX(3deg) scale(1.012);
-  transform-origin: 50% 40%;
-  backface-visibility: hidden;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-    inset 0 18px 44px rgba(0, 0, 0, 0.65),
-    inset 0 -30px 60px rgba(255, 255, 255, 0.02);
-}
-
-@media (max-width: 640px) {
-  .crt-screen {
-    transform: none;
-  }
-}
-
-.crt-content {
-  height: 100%;
-  width: 100%;
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.crt-glass {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  /* Vignette + subtle edge darkening to sell curvature without extra JS. */
-  background:
-    radial-gradient(120% 92% at 50% 6%, rgba(255, 255, 255, 0.10), transparent 42%),
-    radial-gradient(120% 110% at 50% 60%, transparent 55%, rgba(0, 0, 0, 0.55)),
-    radial-gradient(90% 70% at 50% 50%, transparent 62%, rgba(0, 0, 0, 0.30));
-  mix-blend-mode: soft-light;
-  opacity: 0.9;
-}
-
-@keyframes chatIn {
-  from {
+@keyframes ch26-greeting-flicker {
+  0% {
     opacity: 0;
-    transform: translateY(10px);
   }
-  to {
+  10% {
+    opacity: 0.86;
+  }
+  14% {
+    opacity: 0.18;
+  }
+  20% {
+    opacity: 0.96;
+  }
+  28% {
+    opacity: 0.52;
+  }
+  36% {
+    opacity: 0.98;
+  }
+  100% {
     opacity: 1;
-    transform: translateY(0);
   }
 }

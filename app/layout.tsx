@@ -1,11 +1,16 @@
 import type { Metadata } from "next";
-import { Fraunces, IBM_Plex_Mono, Instrument_Sans } from "next/font/google";
+import { Fraunces, IBM_Plex_Mono, Instrument_Sans, Manrope } from "next/font/google";
 import "./globals.css";
-import { CrtFrame } from "@/app/components/crt-frame";
 
 const instrumentSans = Instrument_Sans({
   variable: "--font-instrument-sans",
   subsets: ["latin"],
+});
+
+const manrope = Manrope({
+  variable: "--font-manrope",
+  subsets: ["latin"],
+  weight: ["400", "600"],
 });
 
 const fraunces = Fraunces({
@@ -32,9 +37,23 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${instrumentSans.variable} ${fraunces.variable} ${plexMono.variable} antialiased`}
+        className={[
+          manrope.variable,
+          instrumentSans.variable,
+          fraunces.variable,
+          plexMono.variable,
+          "min-h-dvh",
+          "font-sans",
+          "antialiased",
+          "leading-[1.45]",
+          "text-foreground",
+          "bg-[linear-gradient(to_bottom,var(--ch26-shell-from),var(--ch26-shell-to))]",
+          "selection:bg-[color-mix(in_srgb,var(--accent)_28%,transparent)]",
+          "selection:text-foreground",
+          "[text-rendering:optimizeLegibility]",
+        ].join(" ")}
       >
-        <CrtFrame>{children}</CrtFrame>
+        {children}
       </body>
     </html>
   );
