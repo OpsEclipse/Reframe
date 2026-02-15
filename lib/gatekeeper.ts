@@ -1,4 +1,12 @@
 import { groqChatCompletion } from "@/lib/groq-client";
+import { openaiChatCompletion } from "@/lib/openai-client";
+import { envInt } from "@/lib/retry";
+import { logEvent } from "@/lib/log";
+
+type GatekeeperCacheEntry = { expiresAt: number; value: GatekeeperMetadata };
+
+const gatekeeperCache = new Map<string, GatekeeperCacheEntry>();
+const gatekeeperInflight = new Map<string, Promise<GatekeeperMetadata>>();
 
 export const ALLOWED_EMOTIONS = [
   "Joy",
@@ -34,6 +42,7 @@ export type GatekeeperInput = {
   query: string;
   timezone?: string; // IANA tz, e.g. "America/Los_Angeles"
   todayOverride?: string; // YYYY-MM-DD, for deterministic tests/calls
+  requestId?: string; // logging/correlation only
 };
 
 function yyyymmddFromISODate(dateIso: string): number | null {
@@ -188,13 +197,44 @@ export async function gatekeepQuery(input: GatekeeperInput): Promise<GatekeeperM
   const query = input.query?.trim();
   if (!query) throw new Error("query is required");
 
-  // Prefer explicit env, otherwise fall back to a commonly-available "small" Groq model.
-  // If your Groq account doesn't support this model name, set GATEKEEPER_MODEL.
-  const model = process.env.GATEKEEPER_MODEL || process.env.GROQ_MODEL || "llama3-8b-8192";
+  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+  const hasGroq = !!process.env.GROQ_API_KEY;
+  if (!hasOpenAI && !hasGroq) {
+    throw new Error("Missing required env var: OPENAI_API_KEY (preferred) or GROQ_API_KEY (fallback)");
+  }
+
+  // Gatekeeper primary model: OpenAI GPT-4o mini by default.
+  // Groq is kept as a fallback provider.
+  const primaryModel = (process.env.GATEKEEPER_MODEL || "").trim() || "gpt-4o-mini";
+  const fallbackModel =
+    (process.env.GATEKEEPER_FALLBACK_MODEL || "").trim() ||
+    (process.env.GROQ_MODEL || "").trim() ||
+    "llama3-8b-8192";
 
   const todayIso = input.todayOverride || todayInTimezone(input.timezone);
   const todayInt = yyyymmddFromISODate(todayIso);
   const todayLine = todayInt ? `${todayIso} (date_int=${todayInt})` : todayIso;
+
+  const cacheTtlMs = Math.max(0, envInt("GATEKEEPER_CACHE_TTL_MS", 60_000));
+  const cacheMax = Math.max(1, envInt("GATEKEEPER_CACHE_MAX", 500));
+  const cacheKey = `${primaryModel}::${fallbackModel}::${input.timezone || ""}::${todayIso}::${query}`;
+  if (cacheTtlMs > 0) {
+    const cached = gatekeeperCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      logEvent("info", "gatekeeper.cache_hit", {
+        requestId: input.requestId,
+        ttlMs: cacheTtlMs,
+      });
+      return cached.value;
+    }
+    if (cached) gatekeeperCache.delete(cacheKey);
+
+    const inflight = gatekeeperInflight.get(cacheKey);
+    if (inflight) {
+      logEvent("info", "gatekeeper.inflight_join", { requestId: input.requestId });
+      return await inflight;
+    }
+  }
 
   const system = [
     "You are Gatekeeper.",
@@ -231,7 +271,6 @@ export async function gatekeepQuery(input: GatekeeperInput): Promise<GatekeeperM
   ].join("\n");
 
   const baseReq = {
-    model,
     temperature: 0,
     max_tokens: 250,
     messages: [
@@ -240,20 +279,98 @@ export async function gatekeepQuery(input: GatekeeperInput): Promise<GatekeeperM
     ],
   };
 
-  // JSON mode isn't guaranteed for every Groq model. Try it first, then retry without.
-  let completion: { content: string } | null = null;
-  try {
-    completion = await groqChatCompletion({ ...baseReq, response_format: { type: "json_object" } });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "";
-    // If the provider/model rejects response_format, retry without it.
-    if (msg.toLowerCase().includes("response_format") || msg.toLowerCase().includes("json_object")) {
-      completion = await groqChatCompletion(baseReq);
-    } else {
-      throw e;
-    }
-  }
+  const run = async (): Promise<GatekeeperMetadata> => {
+    // Try OpenAI first when available, then fall back to Groq.
+    // Note: JSON mode isn't guaranteed for every model/provider; retry without response_format when rejected.
+    let completion: { content: string } | null = null;
+    let lastErr: unknown = null;
+    let usedProvider: "openai" | "groq" | null = null;
 
-  const raw = extractJsonObject(completion.content);
-  return parseGatekeeperMetadata(raw);
+    if (hasOpenAI) {
+      try {
+        completion = await openaiChatCompletion(
+          { ...baseReq, model: primaryModel, response_format: { type: "json_object" } },
+          { maxRetries: 0, requestId: input.requestId, purpose: "gatekeeper" }, // prefer fast fallback to Groq on rate limits
+        );
+        usedProvider = "openai";
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg.toLowerCase().includes("response_format") || msg.toLowerCase().includes("json_object")) {
+          try {
+            completion = await openaiChatCompletion(
+              { ...baseReq, model: primaryModel },
+              { maxRetries: 0, requestId: input.requestId, purpose: "gatekeeper" },
+            );
+            usedProvider = "openai";
+          } catch (e2) {
+            lastErr = e2;
+          }
+        } else {
+          lastErr = e;
+        }
+      }
+    }
+
+    if (!completion && hasGroq) {
+      if (hasOpenAI && lastErr) {
+        logEvent("warn", "gatekeeper.fallback", {
+          requestId: input.requestId,
+          from: "openai",
+          to: "groq",
+          primaryModel,
+          fallbackModel,
+          error: lastErr instanceof Error ? lastErr.message : String(lastErr),
+        });
+      }
+      try {
+        completion = await groqChatCompletion({
+          ...baseReq,
+          model: fallbackModel,
+          response_format: { type: "json_object" },
+        }, { requestId: input.requestId, purpose: "gatekeeper_fallback" });
+        usedProvider = "groq";
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg.toLowerCase().includes("response_format") || msg.toLowerCase().includes("json_object")) {
+          try {
+            completion = await groqChatCompletion(
+              { ...baseReq, model: fallbackModel },
+              { requestId: input.requestId, purpose: "gatekeeper_fallback" },
+            );
+            usedProvider = "groq";
+          } catch (e2) {
+            lastErr = e2;
+          }
+        } else {
+          lastErr = e;
+        }
+      }
+    }
+
+    if (!completion) throw (lastErr instanceof Error ? lastErr : new Error("Gatekeeper LLM request failed"));
+
+    logEvent("info", "gatekeeper.complete", {
+      requestId: input.requestId,
+      primaryModel,
+      fallbackModel,
+      usedProvider,
+    });
+
+    const raw = extractJsonObject(completion.content);
+    return parseGatekeeperMetadata(raw);
+  };
+
+  if (cacheTtlMs <= 0) return await run();
+
+  if (gatekeeperCache.size > cacheMax) gatekeeperCache.clear();
+
+  const promise = run();
+  gatekeeperInflight.set(cacheKey, promise);
+  try {
+    const value = await promise;
+    gatekeeperCache.set(cacheKey, { expiresAt: Date.now() + cacheTtlMs, value });
+    return value;
+  } finally {
+    gatekeeperInflight.delete(cacheKey);
+  }
 }

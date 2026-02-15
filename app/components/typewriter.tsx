@@ -9,11 +9,6 @@ export type TypewriterSegment = {
   pauseAfterMs?: number;
 };
 
-function prefersReducedMotion(): boolean {
-  if (typeof window === "undefined") return false;
-  return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
-}
-
 function fnv1a32(input: string): number {
   let h = 2166136261;
   for (let i = 0; i < input.length; i++) {
@@ -119,15 +114,16 @@ export function useTypewriterTextMap(opts: {
     return out;
   }, [charsPerSecond, runId, segments]);
 
-  const [visibleChars, setVisibleChars] = useState(0);
+  const [visibleState, setVisibleState] = useState<{ runId: number; visibleChars: number }>(() => ({
+    runId,
+    visibleChars: 0,
+  }));
+  const visibleChars = visibleState.runId === runId ? visibleState.visibleChars : 0;
+  const effectiveVisibleChars = reducedMotion ? totalChars : visibleChars;
 
   useLayoutEffect(() => {
-    if (reducedMotion) {
-      setVisibleChars(totalChars);
-      return;
-    }
+    if (reducedMotion) return;
 
-    setVisibleChars(0);
     const startAt = performance.now() + delayMs;
     let raf = 0;
     let last = -1;
@@ -142,7 +138,8 @@ export function useTypewriterTextMap(opts: {
       const next = Math.min(totalChars, upperBound(scheduleMs, elapsedMs));
       if (next !== last) {
         last = next;
-        setVisibleChars(next);
+        // Tag state with runId so it resets to 0 immediately when a new run starts.
+        setVisibleState({ runId, visibleChars: next });
       }
 
       if (next < totalChars) {
@@ -156,7 +153,7 @@ export function useTypewriterTextMap(opts: {
 
   const textById = useMemo(() => {
     const out: Record<string, string> = {};
-    let remaining = visibleChars;
+    let remaining = effectiveVisibleChars;
 
     for (const seg of segments) {
       const full = seg.text ?? "";
@@ -170,7 +167,7 @@ export function useTypewriterTextMap(opts: {
     }
 
     return out;
-  }, [segments, visibleChars]);
+  }, [segments, effectiveVisibleChars]);
 
-  return { textById, isDone: visibleChars >= totalChars };
+  return { textById, isDone: effectiveVisibleChars >= totalChars };
 }

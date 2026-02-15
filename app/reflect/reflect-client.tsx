@@ -6,6 +6,7 @@ import { ArchiveReflectionSchema, type ArchiveReflection } from "@/lib/archive-r
 
 import RatingButton, { EnterArrowIcon } from "../components/rating_button";
 import ReframeTimelineEntry from "../components/reframe-timeline-entry";
+import SourcePreviewModal from "../components/source-preview-modal";
 import { useTypewriterTextMap, type TypewriterSegment } from "../components/typewriter";
 
 function detectTimezone(): string | undefined {
@@ -44,6 +45,8 @@ export default function ReflectClient() {
   const [error, setError] = useState<string | null>(null);
   const [runId, setRunId] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
+  const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
+  const [sourceModalIndex, setSourceModalIndex] = useState(0);
 
   const generate = useCallback(async (payload?: { timezone?: string; name?: string }) => {
     abortRef.current?.abort();
@@ -96,7 +99,31 @@ export default function ReflectClient() {
   }, [generate]);
 
   const timeline = useMemo(() => reflection?.timeline ?? [], [reflection?.timeline]);
+  const sources = useMemo(() => reflection?.sources ?? [], [reflection?.sources]);
+  const sourceIndexById = useMemo(() => {
+    const m = new Map<string, number>();
+    for (let i = 0; i < sources.length; i++) {
+      const id = sources[i]?.id;
+      if (typeof id === "string" && id) m.set(id, i);
+    }
+    return m;
+  }, [sources]);
   const isRateLimited = error === "Rate limited.";
+
+  // If a new reflection arrives, close the modal to avoid mismatched content.
+  useEffect(() => {
+    setIsSourceModalOpen(false);
+  }, [runId]);
+
+  const openSourceModalById = useCallback(
+    (sourceId: string) => {
+      const idx = sourceIndexById.get(sourceId);
+      if (typeof idx !== "number") return;
+      setSourceModalIndex(idx);
+      setIsSourceModalOpen(true);
+    },
+    [sourceIndexById],
+  );
 
   const anchor = useMemo(() => {
     return normalizeAnchorLineSegments({
@@ -148,6 +175,13 @@ export default function ReflectClient() {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col items-start gap-8">
+      {isSourceModalOpen ? (
+        <SourcePreviewModal
+          sources={sources}
+          initialIndex={sourceModalIndex}
+          onClose={() => setIsSourceModalOpen(false)}
+        />
+      ) : null}
       <div className="flex w-full items-start justify-between gap-6">
         <div className="min-w-0 flex-1">
           <p className="text-[20px] font-semibold leading-none text-white/90 whitespace-pre-wrap">
@@ -197,12 +231,18 @@ export default function ReflectClient() {
       <div className="flex w-full flex-col items-start gap-8">
         {timeline.map((item, idx) => {
           const isLast = idx === timeline.length - 1;
+          const sourceIdx =
+            item?.source_id && typeof item.source_id === "string" ? sourceIndexById.get(item.source_id) : undefined;
+          const hasSource = typeof sourceIdx === "number";
           return (
             <ReframeTimelineEntry
               key={`tl-${idx}`}
               periodLabel={reflection ? textById[`tl-${idx}-period`] ?? "" : item?.periodLabel ?? ""}
               entriesCountLabel={reflection ? textById[`tl-${idx}-count`] ?? "" : item?.entriesCountLabel ?? ""}
               periodLabelClassName={isLast ? "text-[#fcc84e]" : undefined}
+              onEntriesClick={item?.source_id ? () => openSourceModalById(item.source_id!) : undefined}
+              entriesButtonDisabled={!hasSource}
+              entriesButtonAriaLabel="Open source preview"
             >
               {reflection ? textById[`tl-${idx}-content`] ?? "" : item?.content ?? ""}
             </ReframeTimelineEntry>

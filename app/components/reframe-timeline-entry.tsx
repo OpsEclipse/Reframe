@@ -6,6 +6,9 @@ export type ReframeTimelineEntryProps = Omit<ComponentPropsWithoutRef<"div">, "c
   periodLabelClassName?: string;
   entriesCountClassName?: string;
   children: ReactNode;
+  onEntriesClick?: () => void;
+  entriesButtonDisabled?: boolean;
+  entriesButtonAriaLabel?: string;
 };
 
 export default function ReframeTimelineEntry({
@@ -14,9 +17,13 @@ export default function ReframeTimelineEntry({
   periodLabelClassName,
   entriesCountClassName,
   children,
+  onEntriesClick,
+  entriesButtonDisabled = false,
+  entriesButtonAriaLabel = "Open source preview",
   className,
   ...props
 }: ReframeTimelineEntryProps) {
+  const EntriesWrapper = onEntriesClick ? "button" : "div";
   return (
     <div
       {...props}
@@ -40,13 +47,26 @@ export default function ReframeTimelineEntry({
             {periodLabel}
           </p>
 
-          <div
+          <EntriesWrapper
+            {...(onEntriesClick
+              ? {
+                  type: "button" as const,
+                  onClick: onEntriesClick,
+                  disabled: entriesButtonDisabled,
+                  "aria-label": entriesButtonAriaLabel,
+                }
+              : {})}
             className={[
               "shrink-0",
               "flex items-center gap-1",
               "rounded-[4px] bg-white/5 px-2 py-1",
               "text-[10px]",
-            ].join(" ")}
+              onEntriesClick
+                ? "transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-white/5"
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
             data-node-id="36:3842"
           >
             <p
@@ -58,7 +78,7 @@ export default function ReframeTimelineEntry({
             <p className="shrink-0 text-white/25" data-node-id="36:3844">
               ENTRIES
             </p>
-          </div>
+          </EntriesWrapper>
         </div>
       </div>
 

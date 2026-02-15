@@ -20,9 +20,9 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-## Gatekeeper (Groq) API
+## Gatekeeper (OpenAI, Groq Fallback) API
 
-This repo includes a backend route that uses Groq to extract nullable metadata from a query, then embeds the rewritten query using OpenAI (`text-embedding-3-*`).
+This repo includes a backend route that uses **OpenAI** (default model: `gpt-4o-mini`) to extract nullable metadata from a query, then embeds the rewritten query using OpenAI embeddings (`text-embedding-3-*`). If OpenAI is unavailable/erroring and `GROQ_API_KEY` is set, it will fall back to Groq for the Gatekeeper call.
 
 - Endpoint: `POST /api/gatekeeper`
 - Body: `{ "query": string, "timezone"?: string, "embed"?: boolean, "include_embedding_vector"?: boolean }`
@@ -59,14 +59,24 @@ Example response:
 
 Env vars (see `.env.example`):
 
-- `GROQ_API_KEY` (required)
-- `GATEKEEPER_MODEL` (optional, defaults to `llama3-8b-8192`; can also use `GROQ_MODEL`)
-- `MAIN_LLM_MODEL` (optional, defaults to `llama-3.3-70b-versatile`)
+- `LOG_LLM` (optional, set to `1` to log LLM pipeline timings, retries, fallbacks, caching; also enabled when `CHAT_DEBUG=1`)
+- `OPENAI_API_KEY` (required for gatekeeper + embeddings when `embed` is true; preferred provider)
+- `OPENAI_MAX_RETRIES` (optional, defaults to `2`; retries 429/5xx with backoff)
+- `OPENAI_MAX_CONCURRENCY` (optional, defaults to `4`; limits concurrent OpenAI requests per node process)
+- `GATEKEEPER_MODEL` (optional, defaults to `gpt-4o-mini`)
+- `GATEKEEPER_FALLBACK_MODEL` (optional, defaults to `GROQ_MODEL` or `llama3-8b-8192`)
+- `GATEKEEPER_CACHE_TTL_MS` (optional, defaults to `60000`; set `0` to disable)
+- `GROQ_API_KEY` (optional; used as fallback for both Gatekeeper and `/api/chat` main LLM generation when set)
+- `GROQ_MAX_RETRIES` (optional, defaults to `2`; retries 429/5xx with backoff)
+- `GROQ_MAX_CONCURRENCY` (optional, defaults to `4`; limits concurrent Groq requests per node process)
+- `MAIN_LLM_MODEL` (optional, defaults to `gpt-4o` on OpenAI)
+- `MAIN_LLM_FALLBACK_MODEL` (optional, defaults to `llama-3.3-70b-versatile` on Groq)
+- `MAIN_LLM_OPENAI_ROUTE_MAX_RETRIES` (optional, defaults to `1`; OpenAI retries in `/api/chat` before falling back to Groq)
 - `CHAT_DEBUG` (optional, set to `1` to include `debug` fields in `/api/chat` responses)
 - `GROQ_BASE_URL` (optional, defaults to `https://api.groq.com/openai/v1`)
 - `GROQ_TIMEOUT_MS` (optional, defaults to `20000`)
-- `OPENAI_API_KEY` (required if `embed` is true)
 - `OPENAI_EMBEDDING_MODEL` (optional, defaults to `text-embedding-3-small`)
+- `OPENAI_EMBED_CACHE_TTL_MS` (optional, defaults to `300000`; set `0` to disable)
 - `OPENAI_BASE_URL` (optional, defaults to `https://api.openai.com/v1`)
 - `OPENAI_TIMEOUT_MS` (optional, defaults to `20000`)
 - `PINECONE_API_KEY` (required for retrieval)

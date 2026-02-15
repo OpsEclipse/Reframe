@@ -133,20 +133,41 @@ function createMessage(role: Role, content: string): ChatMessage {
 
 async function callChat(query: string): Promise<ChatGenerateResponse> {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const res = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, timezone }),
-  });
+  const body = JSON.stringify({ query, timezone });
 
-  const json: unknown = await res.json().catch(() => null);
-  if (!res.ok) {
-    const msg =
-      isRecord(json) && typeof json.error === "string" ? json.error : `HTTP ${res.status}`;
-    throw new Error(msg);
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+  const parseRetryAfterMs = (res: Response) => {
+    const raw = res.headers.get("Retry-After");
+    const n = raw ? Number(raw) : NaN;
+    if (!Number.isFinite(n) || n <= 0) return 750;
+    return Math.min(10_000, Math.trunc(n * 1000));
+  };
+
+  // Avoid failing fast on transient upstream 429s.
+  const maxRetries = 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+
+    if (res.status === 429 && attempt < maxRetries) {
+      await sleep(parseRetryAfterMs(res));
+      continue;
+    }
+
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      const msg =
+        isRecord(json) && typeof json.error === "string" ? json.error : `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    if (!isRecord(json)) throw new Error("Empty/invalid response from /api/chat");
+    return json as ChatGenerateResponse;
   }
-  if (!isRecord(json)) throw new Error("Empty/invalid response from /api/chat");
-  return json as ChatGenerateResponse;
+
+  throw new Error("Rate limited.");
 }
 
 function isNonEmptyStringArray(x: unknown): x is string[] {
