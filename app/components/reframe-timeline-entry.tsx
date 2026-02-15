@@ -3,12 +3,16 @@ import type { ComponentPropsWithoutRef, ReactNode } from "react";
 export type ReframeTimelineEntryProps = Omit<ComponentPropsWithoutRef<"div">, "children"> & {
   periodLabel: string;
   entriesCountLabel: string;
+  periodLabelClassName?: string;
+  entriesCountClassName?: string;
   children: ReactNode;
 };
 
 export default function ReframeTimelineEntry({
   periodLabel,
   entriesCountLabel,
+  periodLabelClassName,
+  entriesCountClassName,
   children,
   className,
   ...props
@@ -29,7 +33,10 @@ export default function ReframeTimelineEntry({
           ].join(" ")}
           data-node-id="36:3840"
         >
-          <p className="shrink-0 text-white/40" data-node-id="36:3841">
+          <p
+            className={["shrink-0 text-white/40", periodLabelClassName].filter(Boolean).join(" ")}
+            data-node-id="36:3841"
+          >
             {periodLabel}
           </p>
 
@@ -42,7 +49,10 @@ export default function ReframeTimelineEntry({
             ].join(" ")}
             data-node-id="36:3842"
           >
-            <p className="shrink-0 text-white/60" data-node-id="36:3843">
+            <p
+              className={["shrink-0 text-white/60", entriesCountClassName].filter(Boolean).join(" ")}
+              data-node-id="36:3843"
+            >
               {entriesCountLabel}
             </p>
             <p className="shrink-0 text-white/25" data-node-id="36:3844">
@@ -77,4 +87,3 @@ export default function ReframeTimelineEntry({
     </div>
   );
 }
-
